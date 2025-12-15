@@ -31,7 +31,9 @@ export function FileUpload({ onFileSelect, isLoading }: FileUploadProps) {
     const files = e.dataTransfer.files;
     if (files.length > 0) {
       const file = files[0];
-      if (file.type === 'text/csv' || file.name.endsWith('.csv')) {
+      const validExtensions = ['.csv', '.xlsx', '.xls'];
+      const isValid = validExtensions.some(ext => file.name.toLowerCase().endsWith(ext));
+      if (isValid) {
         setFileName(file.name);
         onFileSelect(file);
       }
@@ -64,7 +66,7 @@ export function FileUpload({ onFileSelect, isLoading }: FileUploadProps) {
       <input
         ref={inputRef}
         type="file"
-        accept=".csv"
+        accept=".csv,.xlsx,.xls"
         onChange={handleChange}
         className="sr-only"
         disabled={isLoading}
@@ -99,7 +101,9 @@ export function FileUpload({ onFileSelect, isLoading }: FileUploadProps) {
         
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="px-2 py-1 rounded-md bg-muted">.csv</span>
-          <span>files supported</span>
+          <span className="px-2 py-1 rounded-md bg-muted">.xlsx</span>
+          <span className="px-2 py-1 rounded-md bg-muted">.xls</span>
+          <span>supported</span>
         </div>
       </div>
 

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
 import { FileUpload } from '@/components/FileUpload';
 import { CleaningResults } from '@/components/CleaningResults';
 import { CleaningResult, cleanData } from '@/lib/csvCleaner';
@@ -11,39 +12,75 @@ const Index = () => {
   const [fileName, setFileName] = useState('');
   const [error, setError] = useState<string | null>(null);
 
+  const parseExcelFile = (file: File): Promise<Record<string, unknown>[]> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = e.target?.result;
+          const workbook = XLSX.read(data, { type: 'binary' });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet) as Record<string, unknown>[];
+          resolve(jsonData);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsBinaryString(file);
+    });
+  };
+
   const handleFileSelect = async (file: File) => {
     setIsLoading(true);
     setError(null);
     setFileName(file.name);
 
+    const isExcel = file.name.toLowerCase().endsWith('.xlsx') || file.name.toLowerCase().endsWith('.xls');
+
     try {
-      Papa.parse(file, {
-        header: true,
-        skipEmptyLines: true,
-        complete: (results) => {
-          if (results.errors.length > 0) {
-            setError('Error parsing CSV file. Please ensure it is properly formatted.');
-            setIsLoading(false);
-            return;
-          }
-
-          const data = results.data as Record<string, unknown>[];
-          
-          if (data.length === 0) {
-            setError('The CSV file appears to be empty.');
-            setIsLoading(false);
-            return;
-          }
-
-          const cleaningResult = cleanData(data);
-          setResult(cleaningResult);
+      if (isExcel) {
+        const data = await parseExcelFile(file);
+        
+        if (data.length === 0) {
+          setError('The Excel file appears to be empty.');
           setIsLoading(false);
-        },
-        error: (err) => {
-          setError(`Error reading file: ${err.message}`);
-          setIsLoading(false);
-        },
-      });
+          return;
+        }
+
+        const cleaningResult = cleanData(data);
+        setResult(cleaningResult);
+        setIsLoading(false);
+      } else {
+        Papa.parse(file, {
+          header: true,
+          skipEmptyLines: true,
+          complete: (results) => {
+            if (results.errors.length > 0) {
+              setError('Error parsing CSV file. Please ensure it is properly formatted.');
+              setIsLoading(false);
+              return;
+            }
+
+            const data = results.data as Record<string, unknown>[];
+            
+            if (data.length === 0) {
+              setError('The CSV file appears to be empty.');
+              setIsLoading(false);
+              return;
+            }
+
+            const cleaningResult = cleanData(data);
+            setResult(cleaningResult);
+            setIsLoading(false);
+          },
+          error: (err) => {
+            setError(`Error reading file: ${err.message}`);
+            setIsLoading(false);
+          },
+        });
+      }
     } catch (err) {
       setError('An unexpected error occurred while processing the file.');
       setIsLoading(false);
@@ -83,11 +120,11 @@ const Index = () => {
                 Smart Data Cleaning
               </div>
               <h2 className="text-3xl md:text-4xl font-bold text-foreground">
-                Clean Your CSV Data{' '}
+                Clean Your Data{' '}
                 <span className="gradient-text">Intelligently</span>
               </h2>
               <p className="text-muted-foreground max-w-lg mx-auto">
-                Upload your CSV file and our smart analyzer will detect issues and clean your data 
+                Upload your CSV or Excel file and our smart analyzer will detect issues and clean your data 
                 without removing valid outliers or meaningful values.
               </p>
             </div>
