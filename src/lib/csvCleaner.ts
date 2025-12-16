@@ -235,3 +235,14 @@ export function dataToCSV(data: Record<string, unknown>[]): string {
 
   return [header, ...rows].join('\n');
 }
+
+// Convert data to Excel blob for download
+export function dataToExcel(data: Record<string, unknown>[]): Blob {
+  // Dynamic import workaround - xlsx should be passed in or we import it
+  const XLSX = (window as unknown as { XLSX: typeof import('xlsx') }).XLSX;
+  const worksheet = XLSX.utils.json_to_sheet(data);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Cleaned Data');
+  const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+  return new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
