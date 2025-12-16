@@ -10,6 +10,7 @@ const Index = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<CleaningResult | null>(null);
   const [fileName, setFileName] = useState('');
+  const [fileFormat, setFileFormat] = useState<'csv' | 'excel'>('csv');
   const [error, setError] = useState<string | null>(null);
 
   const parseExcelFile = (file: File): Promise<Record<string, unknown>[]> => {
@@ -38,6 +39,7 @@ const Index = () => {
     setFileName(file.name);
 
     const isExcel = file.name.toLowerCase().endsWith('.xlsx') || file.name.toLowerCase().endsWith('.xls');
+    setFileFormat(isExcel ? 'excel' : 'csv');
 
     try {
       if (isExcel) {
@@ -90,6 +92,7 @@ const Index = () => {
   const handleReset = () => {
     setResult(null);
     setFileName('');
+    setFileFormat('csv');
     setError(null);
   };
 
@@ -178,7 +181,8 @@ const Index = () => {
           <div className="max-w-5xl mx-auto">
             <CleaningResults 
               result={result} 
-              originalFileName={fileName} 
+              originalFileName={fileName}
+              originalFormat={fileFormat}
               onReset={handleReset} 
             />
           </div>
