@@ -3,8 +3,14 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { FileUpload } from '@/components/FileUpload';
 import { CleaningResults } from '@/components/CleaningResults';
+import { SheetSelector } from '@/components/SheetSelector';
 import { CleaningResult, cleanData } from '@/lib/csvCleaner';
 import { Sparkles, Database, Shield, Zap } from 'lucide-react';
+
+interface ExcelWorkbook {
+  workbook: XLSX.WorkBook;
+  sheetNames: string[];
+}
 
 const Index = () => {
   const [isLoading, setIsLoading] = useState(false);
@@ -12,18 +18,17 @@ const Index = () => {
   const [fileName, setFileName] = useState('');
   const [fileFormat, setFileFormat] = useState<'csv' | 'excel'>('csv');
   const [error, setError] = useState<string | null>(null);
+  const [pendingWorkbook, setPendingWorkbook] = useState<ExcelWorkbook | null>(null);
+  const [showSheetSelector, setShowSheetSelector] = useState(false);
 
-  const parseExcelFile = (file: File): Promise<Record<string, unknown>[]> => {
+  const readExcelWorkbook = (file: File): Promise<ExcelWorkbook> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = (e) => {
         try {
           const data = e.target?.result;
           const workbook = XLSX.read(data, { type: 'binary' });
-          const firstSheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[firstSheetName];
-          const jsonData = XLSX.utils.sheet_to_json(worksheet) as Record<string, unknown>[];
-          resolve(jsonData);
+          resolve({ workbook, sheetNames: workbook.SheetNames });
         } catch (err) {
           reject(err);
         }
@@ -31,6 +36,37 @@ const Index = () => {
       reader.onerror = () => reject(new Error('Failed to read file'));
       reader.readAsBinaryString(file);
     });
+  };
+
+  const processSheet = (workbook: XLSX.WorkBook, sheetName: string) => {
+    const worksheet = workbook.Sheets[sheetName];
+    const jsonData = XLSX.utils.sheet_to_json(worksheet) as Record<string, unknown>[];
+
+    if (jsonData.length === 0) {
+      setError('The selected sheet appears to be empty.');
+      setIsLoading(false);
+      return;
+    }
+
+    const cleaningResult = cleanData(jsonData);
+    setResult(cleaningResult);
+    setIsLoading(false);
+  };
+
+  const handleSheetSelect = (sheetName: string) => {
+    setShowSheetSelector(false);
+    if (pendingWorkbook) {
+      setIsLoading(true);
+      processSheet(pendingWorkbook.workbook, sheetName);
+      setPendingWorkbook(null);
+    }
+  };
+
+  const handleSheetCancel = () => {
+    setShowSheetSelector(false);
+    setPendingWorkbook(null);
+    setFileName('');
+    setFileFormat('csv');
   };
 
   const handleFileSelect = async (file: File) => {
@@ -43,17 +79,17 @@ const Index = () => {
 
     try {
       if (isExcel) {
-        const data = await parseExcelFile(file);
-        
-        if (data.length === 0) {
-          setError('The Excel file appears to be empty.');
-          setIsLoading(false);
-          return;
-        }
+        const excelData = await readExcelWorkbook(file);
 
-        const cleaningResult = cleanData(data);
-        setResult(cleaningResult);
-        setIsLoading(false);
+        if (excelData.sheetNames.length > 1) {
+          // Multiple sheets - show selector
+          setIsLoading(false);
+          setPendingWorkbook(excelData);
+          setShowSheetSelector(true);
+        } else {
+          // Single sheet - process directly
+          processSheet(excelData.workbook, excelData.sheetNames[0]);
+        }
       } else {
         Papa.parse(file, {
           header: true,
@@ -94,6 +130,7 @@ const Index = () => {
     setFileName('');
     setFileFormat('csv');
     setError(null);
+    setPendingWorkbook(null);
   };
 
   return (
@@ -188,6 +225,14 @@ const Index = () => {
           </div>
         )}
       </main>
+
+      {/* Sheet Selector Dialog */}
+      <SheetSelector
+        open={showSheetSelector}
+        sheetNames={pendingWorkbook?.sheetNames || []}
+        onSelect={handleSheetSelect}
+        onCancel={handleSheetCancel}
+      />
 
       {/* Footer */}
       <footer className="border-t border-border/50 mt-auto">
