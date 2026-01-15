@@ -2,24 +2,43 @@ import { useState } from 'react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { FileUpload } from '@/components/FileUpload';
-import { CleaningResults } from '@/components/CleaningResults';
 import { SheetSelector } from '@/components/SheetSelector';
-import { CleaningResult, cleanData } from '@/lib/csvCleaner';
-import { Sparkles, Database, Shield, Zap } from 'lucide-react';
+import { StepIndicator } from '@/components/StepIndicator';
+import { CleaningProgress } from '@/components/CleaningProgress';
+import { CleaningConfigPanel } from '@/components/CleaningConfigPanel';
+import { CleaningSummaryPanel } from '@/components/CleaningSummaryPanel';
+import { ExportPanel } from '@/components/ExportPanel';
+import { DataTable } from '@/components/DataTable';
+import { cleanDataAdvanced } from '@/lib/dataCleaner';
+import { CleaningConfig, DEFAULT_CLEANING_CONFIG, EnhancedCleaningResult } from '@/lib/dataTypes';
+import { Sparkles, Database, Shield, Zap, ArrowLeft, BarChart3 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface ExcelWorkbook {
   workbook: XLSX.WorkBook;
   sheetNames: string[];
 }
 
+const STEPS = [
+  { id: 1, label: 'Upload', description: 'Select your file' },
+  { id: 2, label: 'Clean', description: 'Auto-process data' },
+  { id: 3, label: 'Preview', description: 'Review changes' },
+  { id: 4, label: 'Export', description: 'Download results' },
+];
+
 const Index = () => {
+  const [currentStep, setCurrentStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
-  const [result, setResult] = useState<CleaningResult | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [result, setResult] = useState<EnhancedCleaningResult | null>(null);
   const [fileName, setFileName] = useState('');
   const [fileFormat, setFileFormat] = useState<'csv' | 'excel'>('csv');
   const [error, setError] = useState<string | null>(null);
   const [pendingWorkbook, setPendingWorkbook] = useState<ExcelWorkbook | null>(null);
   const [showSheetSelector, setShowSheetSelector] = useState(false);
+  const [config, setConfig] = useState<CleaningConfig>(DEFAULT_CLEANING_CONFIG);
+  const [rawData, setRawData] = useState<Record<string, unknown>[] | null>(null);
 
   const readExcelWorkbook = (file: File): Promise<ExcelWorkbook> => {
     return new Promise((resolve, reject) => {
@@ -38,6 +57,25 @@ const Index = () => {
     });
   };
 
+  const processData = (data: Record<string, unknown>[]) => {
+    setRawData(data);
+    setCurrentStep(2);
+    setIsProcessing(true);
+  };
+
+  const handleCleaningComplete = () => {
+    if (rawData) {
+      try {
+        const cleaningResult = cleanDataAdvanced(rawData, config);
+        setResult(cleaningResult);
+        setCurrentStep(3);
+      } catch (err) {
+        setError('Error processing data. Please check your file format.');
+      }
+    }
+    setIsProcessing(false);
+  };
+
   const processSheet = (workbook: XLSX.WorkBook, sheetName: string) => {
     const worksheet = workbook.Sheets[sheetName];
     const jsonData = XLSX.utils.sheet_to_json(worksheet) as Record<string, unknown>[];
@@ -48,8 +86,7 @@ const Index = () => {
       return;
     }
 
-    const cleaningResult = cleanData(jsonData);
-    setResult(cleaningResult);
+    processData(jsonData);
     setIsLoading(false);
   };
 
@@ -82,12 +119,10 @@ const Index = () => {
         const excelData = await readExcelWorkbook(file);
 
         if (excelData.sheetNames.length > 1) {
-          // Multiple sheets - show selector
           setIsLoading(false);
           setPendingWorkbook(excelData);
           setShowSheetSelector(true);
         } else {
-          // Single sheet - process directly
           processSheet(excelData.workbook, excelData.sheetNames[0]);
         }
       } else {
@@ -109,8 +144,7 @@ const Index = () => {
               return;
             }
 
-            const cleaningResult = cleanData(data);
-            setResult(cleaningResult);
+            processData(data);
             setIsLoading(false);
           },
           error: (err) => {
@@ -127,10 +161,13 @@ const Index = () => {
 
   const handleReset = () => {
     setResult(null);
+    setRawData(null);
     setFileName('');
     setFileFormat('csv');
     setError(null);
     setPendingWorkbook(null);
+    setCurrentStep(1);
+    setConfig(DEFAULT_CLEANING_CONFIG);
   };
 
   return (
@@ -138,50 +175,64 @@ const Index = () => {
       {/* Header */}
       <header className="border-b border-border/50 bg-card/50 backdrop-blur-xl sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-              <Database className="w-5 h-5 text-primary" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+                <Database className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <h1 className="text-lg font-bold text-foreground">Data Prep Studio</h1>
+                <p className="text-xs text-muted-foreground">Analysis-ready data preparation</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-lg font-bold text-foreground">CSV Data Cleaner</h1>
-              <p className="text-xs text-muted-foreground">Intelligent data quality analysis</p>
-            </div>
+            {currentStep > 1 && (
+              <Button variant="ghost" onClick={handleReset} className="gap-2">
+                <ArrowLeft className="w-4 h-4" />
+                Start Over
+              </Button>
+            )}
           </div>
         </div>
       </header>
 
       <main className="container mx-auto px-4 py-8 md:py-12">
-        {!result ? (
+        {/* Step Indicator */}
+        <div className="max-w-3xl mx-auto mb-8">
+          <StepIndicator steps={STEPS} currentStep={currentStep} />
+        </div>
+
+        {/* Step 1: Upload */}
+        {currentStep === 1 && (
           <div className="max-w-2xl mx-auto space-y-8">
-            {/* Hero Section */}
             <div className="text-center space-y-4 animate-fade-up">
               <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 text-primary text-sm font-medium">
                 <Sparkles className="w-4 h-4" />
-                Smart Data Cleaning
+                Professional Data Preparation
               </div>
               <h2 className="text-3xl md:text-4xl font-bold text-foreground">
-                Clean Your Data{' '}
-                <span className="gradient-text">Intelligently</span>
+                Prepare Your Data for{' '}
+                <span className="gradient-text">Analysis</span>
               </h2>
               <p className="text-muted-foreground max-w-lg mx-auto">
-                Upload your CSV or Excel file and our smart analyzer will detect issues and clean your data 
-                without removing valid outliers or meaningful values.
+                Upload your dataset and let our intelligent engine clean, standardize, 
+                and optimize it for visualization tools like Power BI and Tableau.
               </p>
             </div>
 
-            {/* Upload Zone */}
             <div className="animate-fade-up stagger-2">
               <FileUpload onFileSelect={handleFileSelect} isLoading={isLoading} />
             </div>
 
-            {/* Error Message */}
             {error && (
               <div className="glass-card rounded-xl p-4 border-destructive/50 bg-destructive/5 animate-scale-in">
                 <p className="text-sm text-destructive text-center">{error}</p>
               </div>
             )}
 
-            {/* Features */}
+            <div className="animate-fade-up stagger-3">
+              <CleaningConfigPanel config={config} onChange={setConfig} />
+            </div>
+
             <div className="grid md:grid-cols-3 gap-4 pt-4">
               <div className="glass-card rounded-xl p-5 animate-fade-up stagger-2">
                 <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-3">
@@ -189,7 +240,7 @@ const Index = () => {
                 </div>
                 <h3 className="font-semibold text-foreground mb-1">Smart Detection</h3>
                 <p className="text-sm text-muted-foreground">
-                  Automatically detects duplicates, missing values, and formatting issues.
+                  Auto-detects data types, outliers, and inconsistencies.
                 </p>
               </div>
 
@@ -199,34 +250,77 @@ const Index = () => {
                 </div>
                 <h3 className="font-semibold text-foreground mb-1">Safe Cleaning</h3>
                 <p className="text-sm text-muted-foreground">
-                  Preserves valid outliers and meaningful negative values in your data.
+                  Handles missing values with intelligent imputation methods.
                 </p>
               </div>
 
               <div className="glass-card rounded-xl p-5 animate-fade-up stagger-4">
                 <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-3">
-                  <Sparkles className="w-5 h-5 text-primary" />
+                  <BarChart3 className="w-5 h-5 text-primary" />
                 </div>
-                <h3 className="font-semibold text-foreground mb-1">Skip If Clean</h3>
+                <h3 className="font-semibold text-foreground mb-1">BI-Ready Output</h3>
                 <p className="text-sm text-muted-foreground">
-                  Won't modify data that's already clean. Only applies necessary fixes.
+                  Creates derived columns and suggests KPIs for dashboards.
                 </p>
               </div>
             </div>
           </div>
-        ) : (
-          <div className="max-w-5xl mx-auto">
-            <CleaningResults 
-              result={result} 
-              originalFileName={fileName}
-              originalFormat={fileFormat}
-              onReset={handleReset} 
-            />
+        )}
+
+        {/* Step 2: Processing */}
+        {currentStep === 2 && (
+          <div className="max-w-2xl mx-auto">
+            <CleaningProgress isProcessing={isProcessing} onComplete={handleCleaningComplete} />
+          </div>
+        )}
+
+        {/* Step 3 & 4: Results */}
+        {currentStep >= 3 && result && (
+          <div className="max-w-5xl mx-auto space-y-8 animate-fade-up">
+            <Tabs defaultValue="summary" className="w-full" onValueChange={(v) => setCurrentStep(v === 'export' ? 4 : 3)}>
+              <TabsList className="grid w-full max-w-md mx-auto grid-cols-3">
+                <TabsTrigger value="summary">Summary</TabsTrigger>
+                <TabsTrigger value="preview">Data Preview</TabsTrigger>
+                <TabsTrigger value="export">Export</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="summary" className="mt-6">
+                <CleaningSummaryPanel 
+                  summary={result.summary} 
+                  actions={result.actions} 
+                  profile={result.profile} 
+                />
+              </TabsContent>
+
+              <TabsContent value="preview" className="mt-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-foreground">Cleaned Data Preview</h3>
+                  <span className="text-sm text-muted-foreground">
+                    {result.data.length.toLocaleString()} rows × {Object.keys(result.data[0] || {}).length} columns
+                  </span>
+                </div>
+                <DataTable data={result.data} maxRows={100} />
+              </TabsContent>
+
+              <TabsContent value="export" className="mt-6">
+                <div className="glass-card rounded-2xl p-8 text-center space-y-6">
+                  <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
+                    <Sparkles className="w-8 h-8 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-bold text-foreground mb-2">Ready for Download</h3>
+                    <p className="text-muted-foreground max-w-md mx-auto">
+                      Your cleaned dataset is ready. Download in multiple formats or generate a detailed cleaning report.
+                    </p>
+                  </div>
+                  <ExportPanel result={result} originalFileName={fileName} originalFormat={fileFormat} />
+                </div>
+              </TabsContent>
+            </Tabs>
           </div>
         )}
       </main>
 
-      {/* Sheet Selector Dialog */}
       <SheetSelector
         open={showSheetSelector}
         sheetNames={pendingWorkbook?.sheetNames || []}
@@ -234,11 +328,10 @@ const Index = () => {
         onCancel={handleSheetCancel}
       />
 
-      {/* Footer */}
       <footer className="border-t border-border/50 mt-auto">
         <div className="container mx-auto px-4 py-6">
           <p className="text-center text-sm text-muted-foreground">
-            CSV Data Cleaner — Built for portfolio demonstrations
+            Data Prep Studio — Professional data preparation for analysis
           </p>
         </div>
       </footer>
