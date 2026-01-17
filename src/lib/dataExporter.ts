@@ -45,6 +45,7 @@ export function dataToJSON(data: DataRow[], pretty = true): string {
 // Generate cleaning report as text
 export function generateCleaningReport(result: EnhancedCleaningResult, fileName: string): string {
   const { summary, actions, profile, config } = result;
+  const { dataDescription } = profile;
   const lines: string[] = [];
   
   lines.push('═══════════════════════════════════════════════════════════════');
@@ -54,14 +55,54 @@ export function generateCleaningReport(result: EnhancedCleaningResult, fileName:
   lines.push(`File: ${fileName}`);
   lines.push(`Generated: ${new Date().toLocaleString()}`);
   lines.push(`Dataset Type: ${profile.type.toUpperCase()} (${(profile.confidence * 100).toFixed(0)}% confidence)`);
+  lines.push(`Data Quality Score: ${dataDescription.dataQualityScore}%`);
   lines.push('');
   
   lines.push('───────────────────────────────────────────────────────────────');
-  lines.push('SUMMARY');
+  lines.push('DATA DESCRIPTION');
+  lines.push('───────────────────────────────────────────────────────────────');
+  lines.push(`Total Rows: ${dataDescription.rowCount.toLocaleString()}`);
+  lines.push(`Total Columns: ${dataDescription.columnCount}`);
+  if (dataDescription.dateRange) {
+    lines.push(`Date Range: ${dataDescription.dateRange}`);
+  }
+  lines.push(`Measure Columns: ${dataDescription.measureColumns.join(', ') || 'None'}`);
+  lines.push(`Dimension Columns: ${dataDescription.dimensionColumns.join(', ') || 'None'}`);
+  lines.push(`Date/Time Columns: ${dataDescription.timeColumns.join(', ') || 'None'}`);
+  lines.push('');
+  
+  if (dataDescription.keyMetrics.length > 0) {
+    lines.push('Key Metrics:');
+    dataDescription.keyMetrics.forEach(metric => {
+      lines.push(`  • ${metric}`);
+    });
+    lines.push('');
+  }
+  
+  lines.push('───────────────────────────────────────────────────────────────');
+  lines.push('CLEANING SUMMARY');
   lines.push('───────────────────────────────────────────────────────────────');
   lines.push(`Rows:        ${summary.rowsBefore.toLocaleString()} → ${summary.rowsAfter.toLocaleString()} (${summary.rowsBefore - summary.rowsAfter} removed)`);
   lines.push(`Columns:     ${summary.columnsBefore} → ${summary.columnsAfter} (${summary.columnsAfter - summary.columnsBefore} added)`);
+  lines.push(`Duplicates Removed: ${summary.duplicatesRemoved}`);
+  lines.push(`Missing Values Handled: ${summary.missingValuesHandled}`);
+  lines.push(`Outliers Handled: ${summary.outliersHandled}`);
+  lines.push(`Dates Fixed: ${summary.datesFixed}`);
+  lines.push(`Interpolated Values: ${summary.interpolatedValues}`);
+  lines.push(`Derived Columns Created: ${summary.derivedColumnsCreated}`);
   lines.push(`Total Changes: ${summary.totalChanges.toLocaleString()}`);
+  lines.push('');
+  
+  lines.push('───────────────────────────────────────────────────────────────');
+  lines.push('WHAT WAS DONE (PLAIN ENGLISH)');
+  lines.push('───────────────────────────────────────────────────────────────');
+  if (dataDescription.cleaningHighlights.length > 0) {
+    dataDescription.cleaningHighlights.forEach(highlight => {
+      lines.push(`✓ ${highlight}`);
+    });
+  } else {
+    lines.push('No cleaning actions were necessary - dataset was already clean!');
+  }
   lines.push('');
   
   lines.push('───────────────────────────────────────────────────────────────');
@@ -69,16 +110,19 @@ export function generateCleaningReport(result: EnhancedCleaningResult, fileName:
   lines.push('───────────────────────────────────────────────────────────────');
   lines.push(`Numeric Imputation:    ${config.numericImputation}`);
   lines.push(`Categorical Imputation: ${config.categoricalImputation}`);
+  lines.push(`Date Imputation:       ${config.dateImputation}`);
   lines.push(`Outlier Detection:     ${config.outlierDetection} (threshold: ${config.outlierThreshold})`);
   lines.push(`Outlier Handling:      ${config.outlierHandling}`);
   lines.push(`Standardize Columns:   ${config.standardizeColumnNames ? 'Yes' : 'No'}`);
   lines.push(`Normalize Categories:  ${config.normalizeCategorical ? 'Yes' : 'No'}`);
   lines.push(`Auto Convert Types:    ${config.autoConvertTypes ? 'Yes' : 'No'}`);
   lines.push(`Create Date Parts:     ${config.createDateParts ? 'Yes' : 'No'}`);
+  lines.push(`Time-Series Interp:    ${config.enableTimeSeriesInterpolation ? 'Yes' : 'No'}`);
+  lines.push(`Zero-Blank Rule:       ${config.enforceZeroBlank ? 'Yes' : 'No'}`);
   lines.push('');
   
   lines.push('───────────────────────────────────────────────────────────────');
-  lines.push('CHANGES APPLIED');
+  lines.push('DETAILED CHANGES APPLIED');
   lines.push('───────────────────────────────────────────────────────────────');
   
   if (actions.length === 0) {
@@ -101,11 +145,18 @@ export function generateCleaningReport(result: EnhancedCleaningResult, fileName:
   
   profile.columns.forEach(col => {
     lines.push(`▸ ${col.name}`);
-    lines.push(`  Type: ${col.dataType} | Role: ${col.role}`);
+    lines.push(`  Type: ${col.dataType} | Classification: ${col.classification} | Role: ${col.role}`);
     lines.push(`  Unique: ${col.uniqueCount} | Missing: ${col.nullCount}`);
     
     if (col.stats) {
       lines.push(`  Stats: min=${col.stats.min.toFixed(2)}, max=${col.stats.max.toFixed(2)}, mean=${col.stats.mean.toFixed(2)}, median=${col.stats.median.toFixed(2)}`);
+      if (col.stats.isSkewed) {
+        lines.push(`  ⚠ Skewed distribution (skewness: ${col.stats.skewness.toFixed(2)})`);
+      }
+    }
+    
+    if (col.dateInfo && col.dateInfo.dateRange) {
+      lines.push(`  Date Range: ${col.dateInfo.dateRange}`);
     }
     
     if (col.issues.length > 0) {

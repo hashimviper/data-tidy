@@ -2,9 +2,11 @@ import { CleaningSummary, CleaningAction, DatasetProfile } from '@/lib/dataTypes
 import { 
   Rows, Columns, Copy, AlertCircle, Type, Zap, Calendar, 
   CheckCircle2, TrendingUp, Filter, Layers, BarChart3,
-  Database, Sparkles, ArrowRight
+  Database, Sparkles, ArrowRight, Clock, FileText, 
+  Gauge, Activity, Info, CalendarDays, Hash
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 
 interface CleaningSummaryPanelProps {
   summary: CleaningSummary;
@@ -14,21 +16,183 @@ interface CleaningSummaryPanelProps {
 
 export function CleaningSummaryPanel({ summary, actions, profile }: CleaningSummaryPanelProps) {
   const hasChanges = summary.totalChanges > 0;
+  const { dataDescription } = profile;
 
   return (
     <div className="space-y-6">
-      {/* Dataset Type Badge */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <Badge variant="secondary" className="gap-1.5 px-3 py-1.5 text-sm">
-          <Database className="w-3.5 h-3.5" />
-          {profile.type.charAt(0).toUpperCase() + profile.type.slice(1)} Dataset
-        </Badge>
-        {profile.confidence > 0.5 && (
-          <span className="text-xs text-muted-foreground">
-            {(profile.confidence * 100).toFixed(0)}% confidence
-          </span>
-        )}
+      {/* Dataset Type & Quality Score */}
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div className="flex items-center gap-3 flex-wrap">
+          <Badge variant="secondary" className="gap-1.5 px-3 py-1.5 text-sm">
+            <Database className="w-3.5 h-3.5" />
+            {profile.type.charAt(0).toUpperCase() + profile.type.slice(1)} Dataset
+          </Badge>
+          {profile.confidence > 0.5 && (
+            <span className="text-xs text-muted-foreground">
+              {(profile.confidence * 100).toFixed(0)}% confidence
+            </span>
+          )}
+        </div>
+        
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Gauge className="w-4 h-4 text-primary" />
+            <span className="text-sm text-muted-foreground">Quality Score:</span>
+            <Badge 
+              variant={dataDescription.dataQualityScore >= 80 ? 'default' : dataDescription.dataQualityScore >= 60 ? 'secondary' : 'destructive'}
+              className="font-mono"
+            >
+              {dataDescription.dataQualityScore}%
+            </Badge>
+          </div>
+        </div>
       </div>
+
+      {/* Data Description Panel */}
+      <div className="glass-card rounded-xl p-5">
+        <h4 className="font-semibold text-foreground mb-4 flex items-center gap-2">
+          <FileText className="w-4 h-4 text-primary" />
+          Data Description
+        </h4>
+        
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+          <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30">
+            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+              <Rows className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-foreground">{dataDescription.rowCount.toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground">Total Rows</p>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30">
+            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+              <Columns className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-foreground">{dataDescription.columnCount}</p>
+              <p className="text-xs text-muted-foreground">Total Columns</p>
+            </div>
+          </div>
+          
+          {dataDescription.dateRange && (
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30">
+              <div className="w-10 h-10 rounded-lg bg-warning/10 flex items-center justify-center">
+                <CalendarDays className="w-5 h-5 text-warning" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-foreground truncate max-w-[150px]" title={dataDescription.dateRange}>
+                  {dataDescription.dateRange}
+                </p>
+                <p className="text-xs text-muted-foreground">Date Range</p>
+              </div>
+            </div>
+          )}
+          
+          <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30">
+            <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center">
+              <Hash className="w-5 h-5 text-success" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-foreground">{dataDescription.measureColumns.length}</p>
+              <p className="text-xs text-muted-foreground">Measures</p>
+            </div>
+          </div>
+        </div>
+        
+        {/* Key Metrics */}
+        {dataDescription.keyMetrics.length > 0 && (
+          <div className="border-t border-border pt-4">
+            <h5 className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
+              <Activity className="w-4 h-4 text-primary" />
+              Key Metrics Overview
+            </h5>
+            <div className="grid md:grid-cols-2 gap-2">
+              {dataDescription.keyMetrics.map((metric, idx) => (
+                <div key={idx} className="text-xs text-muted-foreground font-mono bg-muted/20 px-3 py-2 rounded">
+                  {metric}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        
+        {/* Column Types Summary */}
+        <div className="grid md:grid-cols-3 gap-4 mt-4 pt-4 border-t border-border">
+          {dataDescription.timeColumns.length > 0 && (
+            <div>
+              <h5 className="text-xs font-medium text-muted-foreground mb-2">Date/Time Columns</h5>
+              <div className="flex flex-wrap gap-1">
+                {dataDescription.timeColumns.slice(0, 3).map((col, i) => (
+                  <Badge key={i} variant="outline" className="text-xs bg-warning/5">
+                    {col}
+                  </Badge>
+                ))}
+                {dataDescription.timeColumns.length > 3 && (
+                  <Badge variant="outline" className="text-xs">
+                    +{dataDescription.timeColumns.length - 3} more
+                  </Badge>
+                )}
+              </div>
+            </div>
+          )}
+          
+          {dataDescription.measureColumns.length > 0 && (
+            <div>
+              <h5 className="text-xs font-medium text-muted-foreground mb-2">Measure Columns</h5>
+              <div className="flex flex-wrap gap-1">
+                {dataDescription.measureColumns.slice(0, 3).map((col, i) => (
+                  <Badge key={i} variant="outline" className="text-xs bg-success/5">
+                    {col}
+                  </Badge>
+                ))}
+                {dataDescription.measureColumns.length > 3 && (
+                  <Badge variant="outline" className="text-xs">
+                    +{dataDescription.measureColumns.length - 3} more
+                  </Badge>
+                )}
+              </div>
+            </div>
+          )}
+          
+          {dataDescription.dimensionColumns.length > 0 && (
+            <div>
+              <h5 className="text-xs font-medium text-muted-foreground mb-2">Dimension Columns</h5>
+              <div className="flex flex-wrap gap-1">
+                {dataDescription.dimensionColumns.slice(0, 3).map((col, i) => (
+                  <Badge key={i} variant="outline" className="text-xs bg-primary/5">
+                    {col}
+                  </Badge>
+                ))}
+                {dataDescription.dimensionColumns.length > 3 && (
+                  <Badge variant="outline" className="text-xs">
+                    +{dataDescription.dimensionColumns.length - 3} more
+                  </Badge>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Cleaning Highlights */}
+      {dataDescription.cleaningHighlights.length > 0 && (
+        <div className="glass-card rounded-xl p-5">
+          <h4 className="font-semibold text-foreground mb-3 flex items-center gap-2">
+            <Info className="w-4 h-4 text-primary" />
+            What Was Done (Plain English)
+          </h4>
+          <ul className="space-y-2">
+            {dataDescription.cleaningHighlights.map((highlight, idx) => (
+              <li key={idx} className="flex items-start gap-2 text-sm text-muted-foreground">
+                <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0 mt-0.5" />
+                <span>{highlight}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Before/After Comparison */}
       <div className="glass-card rounded-xl p-5">
@@ -92,21 +256,25 @@ export function CleaningSummaryPanel({ summary, actions, profile }: CleaningSumm
         </div>
 
         {/* Additional Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-border">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4 pt-4 border-t border-border">
           <div className="text-center">
             <span className="text-xs text-muted-foreground">Outliers</span>
             <p className="text-sm font-semibold text-foreground">{summary.outliersHandled}</p>
           </div>
           <div className="text-center">
-            <span className="text-xs text-muted-foreground">Columns Renamed</span>
-            <p className="text-sm font-semibold text-foreground">{summary.columnsRenamed}</p>
+            <span className="text-xs text-muted-foreground">Dates Fixed</span>
+            <p className="text-sm font-semibold text-foreground">{summary.datesFixed}</p>
           </div>
           <div className="text-center">
-            <span className="text-xs text-muted-foreground">Types Converted</span>
-            <p className="text-sm font-semibold text-foreground">{summary.typesConverted}</p>
+            <span className="text-xs text-muted-foreground">Interpolated</span>
+            <p className="text-sm font-semibold text-foreground">{summary.interpolatedValues}</p>
           </div>
           <div className="text-center">
-            <span className="text-xs text-muted-foreground">Derived Columns</span>
+            <span className="text-xs text-muted-foreground">Normalized</span>
+            <p className="text-sm font-semibold text-foreground">{summary.categoricalNormalized}</p>
+          </div>
+          <div className="text-center">
+            <span className="text-xs text-muted-foreground">Derived Cols</span>
             <p className="text-sm font-semibold text-foreground">{summary.derivedColumnsCreated}</p>
           </div>
         </div>
@@ -117,7 +285,7 @@ export function CleaningSummaryPanel({ summary, actions, profile }: CleaningSumm
         <div className="glass-card rounded-xl p-5">
           <h4 className="font-semibold text-foreground mb-4 flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-primary" />
-            Changes Applied
+            Detailed Changes Applied
           </h4>
 
           <div className="space-y-3">
@@ -238,18 +406,30 @@ export function CleaningSummaryPanel({ summary, actions, profile }: CleaningSumm
               <tr className="border-b border-border">
                 <th className="text-left py-2 px-3 font-medium text-muted-foreground">Column</th>
                 <th className="text-left py-2 px-3 font-medium text-muted-foreground">Type</th>
+                <th className="text-left py-2 px-3 font-medium text-muted-foreground">Classification</th>
                 <th className="text-left py-2 px-3 font-medium text-muted-foreground">Role</th>
                 <th className="text-center py-2 px-3 font-medium text-muted-foreground">Unique</th>
                 <th className="text-center py-2 px-3 font-medium text-muted-foreground">Issues</th>
               </tr>
             </thead>
             <tbody>
-              {profile.columns.slice(0, 15).map((col, idx) => (
+              {profile.columns.slice(0, 20).map((col, idx) => (
                 <tr key={idx} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
                   <td className="py-2 px-3 font-mono text-xs text-foreground">{col.name}</td>
                   <td className="py-2 px-3">
                     <Badge variant="outline" className="text-xs capitalize">
                       {col.dataType}
+                    </Badge>
+                  </td>
+                  <td className="py-2 px-3">
+                    <Badge 
+                      variant="outline" 
+                      className={`text-xs ${
+                        col.classification === 'time_series_numeric' ? 'bg-primary/10 text-primary' :
+                        col.classification === 'derived' ? 'bg-muted text-muted-foreground' : ''
+                      }`}
+                    >
+                      {col.classification.replace(/_/g, ' ')}
                     </Badge>
                   </td>
                   <td className="py-2 px-3">
@@ -278,9 +458,9 @@ export function CleaningSummaryPanel({ summary, actions, profile }: CleaningSumm
               ))}
             </tbody>
           </table>
-          {profile.columns.length > 15 && (
+          {profile.columns.length > 20 && (
             <p className="text-xs text-muted-foreground text-center py-2">
-              Showing 15 of {profile.columns.length} columns
+              Showing 20 of {profile.columns.length} columns
             </p>
           )}
         </div>
@@ -300,6 +480,8 @@ function getActionIcon(type: string) {
     trim_whitespace: <Type className="w-4 h-4 text-primary" />,
     create_derived: <Calendar className="w-4 h-4 text-primary" />,
     validate_ranges: <BarChart3 className="w-4 h-4 text-primary" />,
+    fix_dates: <Clock className="w-4 h-4 text-primary" />,
+    zero_blank_enforcement: <CheckCircle2 className="w-4 h-4 text-primary" />,
   };
   return icons[type] || <Sparkles className="w-4 h-4 text-primary" />;
 }
