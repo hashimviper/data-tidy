@@ -3,7 +3,6 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { FileUpload } from '@/components/FileUpload';
 import { SheetSelector } from '@/components/SheetSelector';
-import { StepIndicator } from '@/components/StepIndicator';
 import { CleaningProgress } from '@/components/CleaningProgress';
 import { CleaningConfigPanel } from '@/components/CleaningConfigPanel';
 import { ColumnConfigPanel, ColumnOverride } from '@/components/ColumnConfigPanel';
@@ -11,25 +10,22 @@ import { CleaningSummaryPanel } from '@/components/CleaningSummaryPanel';
 import { ExportPanel } from '@/components/ExportPanel';
 import { DataTable } from '@/components/DataTable';
 import { BeforeAfterCharts } from '@/components/BeforeAfterCharts';
-import { ThemeToggle } from '@/components/ThemeToggle';
+import { DashboardSidebar } from '@/components/DashboardSidebar';
+import { DashboardHeader } from '@/components/DashboardHeader';
+import { QuickStats } from '@/components/QuickStats';
+import { InteractiveUpload } from '@/components/InteractiveUpload';
 import { cleanDataAdvanced } from '@/lib/dataCleaner';
 import { profileColumn } from '@/lib/dataAnalyzer';
 import { CleaningConfig, DEFAULT_CLEANING_CONFIG, EnhancedCleaningResult, ColumnProfile } from '@/lib/dataTypes';
-import { Sparkles, Database, Shield, Zap, ArrowLeft, BarChart3 } from 'lucide-react';
+import { Sparkles, Download, BarChart3, Table, FileText, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { cn } from '@/lib/utils';
 
 interface ExcelWorkbook {
   workbook: XLSX.WorkBook;
   sheetNames: string[];
 }
-
-const STEPS = [
-  { id: 1, label: 'Upload', description: 'Select your file' },
-  { id: 2, label: 'Clean', description: 'Auto-process data' },
-  { id: 3, label: 'Preview', description: 'Review changes' },
-  { id: 4, label: 'Export', description: 'Download results' },
-];
 
 const Index = () => {
   const [currentStep, setCurrentStep] = useState(1);
@@ -45,6 +41,8 @@ const Index = () => {
   const [rawData, setRawData] = useState<Record<string, unknown>[] | null>(null);
   const [columnOverrides, setColumnOverrides] = useState<Record<string, ColumnOverride>>({});
   const [columnProfiles, setColumnProfiles] = useState<ColumnProfile[]>([]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [activeTab, setActiveTab] = useState('summary');
 
   const readExcelWorkbook = (file: File): Promise<ExcelWorkbook> => {
     return new Promise((resolve, reject) => {
@@ -66,7 +64,6 @@ const Index = () => {
   const processData = (data: Record<string, unknown>[]) => {
     setRawData(data);
     
-    // Generate initial column profiles for the config panel
     const columns = Object.keys(data[0] || {});
     const profiles = columns.map(col => {
       const values = data.map(row => row[col]);
@@ -75,7 +72,13 @@ const Index = () => {
     setColumnProfiles(profiles);
     
     setCurrentStep(2);
-    setIsProcessing(true);
+  };
+
+  const startCleaning = () => {
+    if (rawData) {
+      setCurrentStep(3);
+      setIsProcessing(true);
+    }
   };
 
   const handleCleaningComplete = () => {
@@ -83,7 +86,7 @@ const Index = () => {
       try {
         const cleaningResult = cleanDataAdvanced(rawData, config);
         setResult(cleaningResult);
-        setCurrentStep(3);
+        setCurrentStep(4);
       } catch (err) {
         setError('Error processing data. Please check your file format.');
       }
@@ -185,9 +188,23 @@ const Index = () => {
     setConfig(DEFAULT_CLEANING_CONFIG);
     setColumnOverrides({});
     setColumnProfiles([]);
+    setActiveTab('summary');
   };
 
-  // Initialize theme on mount
+  const handleNavigate = (step: number) => {
+    if (step === 1) {
+      handleReset();
+    } else if (step === 2 && rawData) {
+      setCurrentStep(2);
+    } else if (step === 3 && rawData) {
+      startCleaning();
+    } else if (step === 4 && result) {
+      setCurrentStep(4);
+    } else if (step === 5 && result) {
+      setCurrentStep(5);
+    }
+  };
+
   useEffect(() => {
     const stored = localStorage.getItem('theme');
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -196,170 +213,200 @@ const Index = () => {
   }, []);
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border/50 bg-card/50 backdrop-blur-xl sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                <Database className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <h1 className="text-lg font-bold text-foreground">Data Prep Studio</h1>
-                <p className="text-xs text-muted-foreground">Analysis-ready data preparation</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <ThemeToggle />
-              {currentStep > 1 && (
-                <Button variant="ghost" onClick={handleReset} className="gap-2">
-                  <ArrowLeft className="w-4 h-4" />
-                  Start Over
-                </Button>
+    <div className="min-h-screen bg-background flex">
+      {/* Sidebar */}
+      <DashboardSidebar
+        currentStep={currentStep}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+        onNavigate={handleNavigate}
+        hasData={!!rawData}
+        hasResult={!!result}
+      />
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col min-h-screen overflow-x-hidden">
+        <DashboardHeader
+          currentStep={currentStep}
+          fileName={fileName}
+          onReset={handleReset}
+          hasData={!!rawData}
+        />
+
+        <main className="flex-1 p-6 overflow-y-auto">
+          {/* Step 1: Upload */}
+          {currentStep === 1 && (
+            <div className="max-w-3xl mx-auto">
+              <InteractiveUpload onFileSelect={handleFileSelect} isLoading={isLoading} />
+              
+              {error && (
+                <div className="glass-card rounded-xl p-4 border-destructive/50 bg-destructive/5 animate-scale-in mt-6">
+                  <p className="text-sm text-destructive text-center">{error}</p>
+                </div>
               )}
             </div>
-          </div>
-        </div>
-      </header>
+          )}
 
-      <main className="container mx-auto px-4 py-8 md:py-12">
-        {/* Step Indicator */}
-        <div className="max-w-3xl mx-auto mb-8">
-          <StepIndicator steps={STEPS} currentStep={currentStep} />
-        </div>
-
-        {/* Step 1: Upload */}
-        {currentStep === 1 && (
-          <div className="max-w-2xl mx-auto space-y-8">
-            <div className="text-center space-y-4 animate-fade-up">
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 text-primary text-sm font-medium">
-                <Sparkles className="w-4 h-4" />
-                Professional Data Preparation
-              </div>
-              <h2 className="text-3xl md:text-4xl font-bold text-foreground">
-                Prepare Your Data for{' '}
-                <span className="gradient-text">Analysis</span>
-              </h2>
-              <p className="text-muted-foreground max-w-lg mx-auto">
-                Upload your dataset and let our intelligent engine clean, standardize, 
-                and optimize it for visualization tools like Power BI and Tableau.
-              </p>
-            </div>
-
-            <div className="animate-fade-up stagger-2">
-              <FileUpload onFileSelect={handleFileSelect} isLoading={isLoading} />
-            </div>
-
-            {error && (
-              <div className="glass-card rounded-xl p-4 border-destructive/50 bg-destructive/5 animate-scale-in">
-                <p className="text-sm text-destructive text-center">{error}</p>
-              </div>
-            )}
-
-            <div className="animate-fade-up stagger-3 space-y-4">
-              <CleaningConfigPanel config={config} onChange={setConfig} />
-              {columnProfiles.length > 0 && (
-                <ColumnConfigPanel 
-                  columns={columnProfiles} 
-                  overrides={columnOverrides}
-                  onChange={setColumnOverrides}
-                />
-              )}
-            </div>
-
-            <div className="grid md:grid-cols-3 gap-4 pt-4">
-              <div className="glass-card rounded-xl p-5 animate-fade-up stagger-2">
-                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-3">
-                  <Zap className="w-5 h-5 text-primary" />
-                </div>
-                <h3 className="font-semibold text-foreground mb-1">Smart Detection</h3>
-                <p className="text-sm text-muted-foreground">
-                  Auto-detects data types, outliers, and inconsistencies.
-                </p>
-              </div>
-
-              <div className="glass-card rounded-xl p-5 animate-fade-up stagger-3">
-                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-3">
-                  <Shield className="w-5 h-5 text-primary" />
-                </div>
-                <h3 className="font-semibold text-foreground mb-1">Safe Cleaning</h3>
-                <p className="text-sm text-muted-foreground">
-                  Handles missing values with intelligent imputation methods.
-                </p>
-              </div>
-
-              <div className="glass-card rounded-xl p-5 animate-fade-up stagger-4">
-                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-3">
-                  <BarChart3 className="w-5 h-5 text-primary" />
-                </div>
-                <h3 className="font-semibold text-foreground mb-1">BI-Ready Output</h3>
-                <p className="text-sm text-muted-foreground">
-                  Creates derived columns and suggests KPIs for dashboards.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Step 2: Processing */}
-        {currentStep === 2 && (
-          <div className="max-w-2xl mx-auto">
-            <CleaningProgress isProcessing={isProcessing} onComplete={handleCleaningComplete} />
-          </div>
-        )}
-
-        {/* Step 3 & 4: Results */}
-        {currentStep >= 3 && result && (
-          <div className="max-w-6xl mx-auto space-y-8 animate-fade-up">
-            <Tabs defaultValue="summary" className="w-full" onValueChange={(v) => setCurrentStep(v === 'export' ? 4 : 3)}>
-              <TabsList className="grid w-full max-w-lg mx-auto grid-cols-4">
-                <TabsTrigger value="summary">Summary</TabsTrigger>
-                <TabsTrigger value="charts">Charts</TabsTrigger>
-                <TabsTrigger value="preview">Data Preview</TabsTrigger>
-                <TabsTrigger value="export">Export</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="summary" className="mt-6">
-                <CleaningSummaryPanel 
-                  summary={result.summary} 
-                  actions={result.actions} 
-                  profile={result.profile} 
-                />
-              </TabsContent>
-
-              <TabsContent value="charts" className="mt-6">
-                <BeforeAfterCharts result={result} />
-              </TabsContent>
-
-              <TabsContent value="preview" className="mt-6 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-foreground">Cleaned Data Preview</h3>
-                  <span className="text-sm text-muted-foreground">
-                    {result.data.length.toLocaleString()} rows × {Object.keys(result.data[0] || {}).length} columns
-                  </span>
-                </div>
-                <DataTable data={result.data} maxRows={100} />
-              </TabsContent>
-
-              <TabsContent value="export" className="mt-6">
-                <div className="glass-card rounded-2xl p-8 text-center space-y-6">
-                  <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
-                    <Sparkles className="w-8 h-8 text-primary" />
-                  </div>
+          {/* Step 2: Configure */}
+          {currentStep === 2 && rawData && (
+            <div className="max-w-4xl mx-auto space-y-6 animate-fade-up">
+              <div className="glass-card rounded-2xl p-6">
+                <div className="flex items-center justify-between mb-6">
                   <div>
-                    <h3 className="text-2xl font-bold text-foreground mb-2">Ready for Download</h3>
-                    <p className="text-muted-foreground max-w-md mx-auto">
-                      Your cleaned dataset is ready. Download in multiple formats or generate a detailed cleaning report.
+                    <h3 className="text-xl font-bold text-foreground">Configure Cleaning Options</h3>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Customize how your data will be processed
                     </p>
                   </div>
-                  <ExportPanel result={result} originalFileName={fileName} originalFormat={fileFormat} />
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground">
+                      {rawData.length.toLocaleString()} rows • {columnProfiles.length} columns
+                    </span>
+                  </div>
                 </div>
-              </TabsContent>
-            </Tabs>
-          </div>
-        )}
-      </main>
+
+                <div className="space-y-4">
+                  <CleaningConfigPanel config={config} onChange={setConfig} />
+                  
+                  {columnProfiles.length > 0 && (
+                    <ColumnConfigPanel 
+                      columns={columnProfiles} 
+                      overrides={columnOverrides}
+                      onChange={setColumnOverrides}
+                    />
+                  )}
+                </div>
+
+                <div className="mt-6 pt-6 border-t border-border flex justify-end">
+                  <Button 
+                    onClick={startCleaning}
+                    size="lg"
+                    className="gap-2 px-8 shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Start Cleaning
+                  </Button>
+                </div>
+              </div>
+
+              {/* Data Preview */}
+              <div className="glass-card rounded-2xl p-6">
+                <h4 className="font-semibold text-foreground mb-4 flex items-center gap-2">
+                  <Table className="w-4 h-4 text-primary" />
+                  Data Preview (First 10 rows)
+                </h4>
+                <DataTable data={rawData} maxRows={10} />
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: Processing */}
+          {currentStep === 3 && (
+            <div className="max-w-2xl mx-auto">
+              <CleaningProgress isProcessing={isProcessing} onComplete={handleCleaningComplete} />
+            </div>
+          )}
+
+          {/* Step 4: Results */}
+          {currentStep === 4 && result && (
+            <div className="space-y-6 animate-fade-up">
+              {/* Quick Stats */}
+              <QuickStats result={result} />
+
+              {/* Tabs */}
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                <TabsList className="inline-flex h-11 items-center justify-center rounded-lg bg-muted p-1 text-muted-foreground">
+                  <TabsTrigger value="summary" className="gap-2">
+                    <FileText className="w-4 h-4" />
+                    Summary
+                  </TabsTrigger>
+                  <TabsTrigger value="charts" className="gap-2">
+                    <BarChart3 className="w-4 h-4" />
+                    Charts
+                  </TabsTrigger>
+                  <TabsTrigger value="preview" className="gap-2">
+                    <Table className="w-4 h-4" />
+                    Data Preview
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="summary" className="mt-6">
+                  <CleaningSummaryPanel 
+                    summary={result.summary} 
+                    actions={result.actions} 
+                    profile={result.profile} 
+                  />
+                </TabsContent>
+
+                <TabsContent value="charts" className="mt-6">
+                  <BeforeAfterCharts result={result} />
+                </TabsContent>
+
+                <TabsContent value="preview" className="mt-6">
+                  <div className="glass-card rounded-2xl p-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg font-semibold text-foreground">Cleaned Data Preview</h3>
+                      <span className="text-sm text-muted-foreground">
+                        {result.data.length.toLocaleString()} rows × {Object.keys(result.data[0] || {}).length} columns
+                      </span>
+                    </div>
+                    <DataTable data={result.data} maxRows={100} />
+                  </div>
+                </TabsContent>
+              </Tabs>
+
+              {/* Export CTA */}
+              <div className="glass-card rounded-2xl p-6 border-primary/20 bg-gradient-to-r from-primary/5 to-transparent">
+                <div className="flex items-center justify-between flex-wrap gap-4">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
+                      <Download className="w-6 h-6 text-primary" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-foreground">Ready for Download</h3>
+                      <p className="text-sm text-muted-foreground">Export your cleaned dataset in multiple formats</p>
+                    </div>
+                  </div>
+                  <Button 
+                    onClick={() => setCurrentStep(5)}
+                    className="gap-2 shadow-lg shadow-primary/20"
+                  >
+                    <Download className="w-4 h-4" />
+                    Go to Export
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Step 5: Export */}
+          {currentStep === 5 && result && (
+            <div className="max-w-3xl mx-auto space-y-6 animate-fade-up">
+              <div className="glass-card rounded-2xl p-8 text-center space-y-6">
+                <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center mx-auto border border-primary/20">
+                  <Sparkles className="w-10 h-10 text-primary" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold text-foreground mb-2">Your Data is Ready!</h3>
+                  <p className="text-muted-foreground max-w-md mx-auto">
+                    Download your cleaned and optimized dataset in multiple formats, or generate a detailed cleaning report.
+                  </p>
+                </div>
+                <ExportPanel result={result} originalFileName={fileName} originalFormat={fileFormat} />
+              </div>
+
+              {/* Back to Results */}
+              <Button 
+                variant="ghost" 
+                onClick={() => setCurrentStep(4)}
+                className="mx-auto flex gap-2"
+              >
+                ← Back to Results
+              </Button>
+            </div>
+          )}
+        </main>
+      </div>
 
       <SheetSelector
         open={showSheetSelector}
@@ -367,14 +414,6 @@ const Index = () => {
         onSelect={handleSheetSelect}
         onCancel={handleSheetCancel}
       />
-
-      <footer className="border-t border-border/50 mt-auto">
-        <div className="container mx-auto px-4 py-6">
-          <p className="text-center text-sm text-muted-foreground">
-            Data Prep Studio — Professional data preparation for analysis
-          </p>
-        </div>
-      </footer>
     </div>
   );
 };
