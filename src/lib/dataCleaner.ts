@@ -420,26 +420,75 @@ export function cleanDataAdvanced(
     }
   }
   
-  // Step 7: Normalize categorical values with common mappings
+  // Step 7: Normalize categorical values with GENDER DATA INTEGRITY RULE
+  // Gender columns are treated as non-inferable - only explicit values are normalized
   if (fullConfig.normalizeCategorical) {
     const normalizations: string[] = [];
+    
+    // GENDER DATA INTEGRITY: Define protected column patterns
+    const protectedColumnPatterns = ['gender', 'sex'];
+    
+    // STRICT gender mappings - ONLY these explicit values are valid
+    const genderExplicitMappings: Record<string, string> = {
+      'm': 'Male', 'male': 'Male', 'M': 'Male', 'MALE': 'Male', 'Male': 'Male',
+      'f': 'Female', 'female': 'Female', 'F': 'Female', 'FEMALE': 'Female', 'Female': 'Female',
+    };
     
     columnProfiles.forEach(profile => {
       if ((profile.dataType === 'categorical' || profile.dataType === 'text' || profile.dataType === 'boolean') && 
           profile.categoricalInfo) {
-        const mappings = profile.categoricalInfo.normalizedMappings;
+        
+        const lowerColName = profile.name.toLowerCase();
+        const isGenderColumn = protectedColumnPatterns.some(p => lowerColName.includes(p));
+        
         let normalized = 0;
         
-        cleanedData.forEach(row => {
-          const val = String(row[profile.name] || '');
-          if (mappings[val]) {
-            row[profile.name] = mappings[val];
-            normalized++;
+        if (isGenderColumn) {
+          // GENDER DATA INTEGRITY RULE:
+          // 1. Only normalize explicitly known values (M/male → Male, F/female → Female)
+          // 2. Missing, invalid, or ambiguous values → "Unknown"
+          // 3. NEVER infer gender from names, patterns, frequencies, or other columns
+          // 4. "Unknown" remains a valid filterable category
+          
+          cleanedData.forEach(row => {
+            const val = row[profile.name];
+            const strVal = String(val || '').trim();
+            
+            if (isEmpty(val)) {
+              // Missing → Unknown (no inference)
+              row[profile.name] = 'Unknown';
+              normalized++;
+            } else if (genderExplicitMappings[strVal]) {
+              // Explicit known value → normalize
+              if (strVal !== genderExplicitMappings[strVal]) {
+                row[profile.name] = genderExplicitMappings[strVal];
+                normalized++;
+              }
+            } else {
+              // Invalid/ambiguous value → Unknown (no inference)
+              row[profile.name] = 'Unknown';
+              normalized++;
+            }
+          });
+          
+          if (normalized > 0) {
+            normalizations.push(`${profile.name}: ${normalized} values (gender integrity rule applied)`);
           }
-        });
-        
-        if (normalized > 0) {
-          normalizations.push(`${profile.name}: ${normalized} values normalized`);
+        } else {
+          // Standard normalization for non-protected columns
+          const mappings = profile.categoricalInfo.normalizedMappings;
+          
+          cleanedData.forEach(row => {
+            const val = String(row[profile.name] || '');
+            if (mappings[val]) {
+              row[profile.name] = mappings[val];
+              normalized++;
+            }
+          });
+          
+          if (normalized > 0) {
+            normalizations.push(`${profile.name}: ${normalized} values normalized`);
+          }
         }
       }
     });
@@ -447,7 +496,7 @@ export function cleanDataAdvanced(
     if (normalizations.length > 0) {
       actions.push({
         type: 'normalize_categorical',
-        description: 'Normalized inconsistent categorical values (e.g., "M" → "Male")',
+        description: 'Normalized categorical values (gender uses strict integrity rules)',
         count: normalizations.length,
         details: normalizations
       });
