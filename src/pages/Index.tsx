@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { FileUpload } from '@/components/FileUpload';
@@ -6,11 +6,15 @@ import { SheetSelector } from '@/components/SheetSelector';
 import { StepIndicator } from '@/components/StepIndicator';
 import { CleaningProgress } from '@/components/CleaningProgress';
 import { CleaningConfigPanel } from '@/components/CleaningConfigPanel';
+import { ColumnConfigPanel, ColumnOverride } from '@/components/ColumnConfigPanel';
 import { CleaningSummaryPanel } from '@/components/CleaningSummaryPanel';
 import { ExportPanel } from '@/components/ExportPanel';
 import { DataTable } from '@/components/DataTable';
+import { BeforeAfterCharts } from '@/components/BeforeAfterCharts';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { cleanDataAdvanced } from '@/lib/dataCleaner';
-import { CleaningConfig, DEFAULT_CLEANING_CONFIG, EnhancedCleaningResult } from '@/lib/dataTypes';
+import { profileColumn } from '@/lib/dataAnalyzer';
+import { CleaningConfig, DEFAULT_CLEANING_CONFIG, EnhancedCleaningResult, ColumnProfile } from '@/lib/dataTypes';
 import { Sparkles, Database, Shield, Zap, ArrowLeft, BarChart3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -39,6 +43,8 @@ const Index = () => {
   const [showSheetSelector, setShowSheetSelector] = useState(false);
   const [config, setConfig] = useState<CleaningConfig>(DEFAULT_CLEANING_CONFIG);
   const [rawData, setRawData] = useState<Record<string, unknown>[] | null>(null);
+  const [columnOverrides, setColumnOverrides] = useState<Record<string, ColumnOverride>>({});
+  const [columnProfiles, setColumnProfiles] = useState<ColumnProfile[]>([]);
 
   const readExcelWorkbook = (file: File): Promise<ExcelWorkbook> => {
     return new Promise((resolve, reject) => {
@@ -59,6 +65,15 @@ const Index = () => {
 
   const processData = (data: Record<string, unknown>[]) => {
     setRawData(data);
+    
+    // Generate initial column profiles for the config panel
+    const columns = Object.keys(data[0] || {});
+    const profiles = columns.map(col => {
+      const values = data.map(row => row[col]);
+      return profileColumn(col, values, []);
+    });
+    setColumnProfiles(profiles);
+    
     setCurrentStep(2);
     setIsProcessing(true);
   };
@@ -168,7 +183,17 @@ const Index = () => {
     setPendingWorkbook(null);
     setCurrentStep(1);
     setConfig(DEFAULT_CLEANING_CONFIG);
+    setColumnOverrides({});
+    setColumnProfiles([]);
   };
+
+  // Initialize theme on mount
+  useEffect(() => {
+    const stored = localStorage.getItem('theme');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const theme = stored || (prefersDark ? 'dark' : 'light');
+    document.documentElement.classList.add(theme);
+  }, []);
 
   return (
     <div className="min-h-screen bg-background">
@@ -185,12 +210,15 @@ const Index = () => {
                 <p className="text-xs text-muted-foreground">Analysis-ready data preparation</p>
               </div>
             </div>
-            {currentStep > 1 && (
-              <Button variant="ghost" onClick={handleReset} className="gap-2">
-                <ArrowLeft className="w-4 h-4" />
-                Start Over
-              </Button>
-            )}
+            <div className="flex items-center gap-2">
+              <ThemeToggle />
+              {currentStep > 1 && (
+                <Button variant="ghost" onClick={handleReset} className="gap-2">
+                  <ArrowLeft className="w-4 h-4" />
+                  Start Over
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </header>
@@ -229,8 +257,15 @@ const Index = () => {
               </div>
             )}
 
-            <div className="animate-fade-up stagger-3">
+            <div className="animate-fade-up stagger-3 space-y-4">
               <CleaningConfigPanel config={config} onChange={setConfig} />
+              {columnProfiles.length > 0 && (
+                <ColumnConfigPanel 
+                  columns={columnProfiles} 
+                  overrides={columnOverrides}
+                  onChange={setColumnOverrides}
+                />
+              )}
             </div>
 
             <div className="grid md:grid-cols-3 gap-4 pt-4">
@@ -276,10 +311,11 @@ const Index = () => {
 
         {/* Step 3 & 4: Results */}
         {currentStep >= 3 && result && (
-          <div className="max-w-5xl mx-auto space-y-8 animate-fade-up">
+          <div className="max-w-6xl mx-auto space-y-8 animate-fade-up">
             <Tabs defaultValue="summary" className="w-full" onValueChange={(v) => setCurrentStep(v === 'export' ? 4 : 3)}>
-              <TabsList className="grid w-full max-w-md mx-auto grid-cols-3">
+              <TabsList className="grid w-full max-w-lg mx-auto grid-cols-4">
                 <TabsTrigger value="summary">Summary</TabsTrigger>
+                <TabsTrigger value="charts">Charts</TabsTrigger>
                 <TabsTrigger value="preview">Data Preview</TabsTrigger>
                 <TabsTrigger value="export">Export</TabsTrigger>
               </TabsList>
@@ -290,6 +326,10 @@ const Index = () => {
                   actions={result.actions} 
                   profile={result.profile} 
                 />
+              </TabsContent>
+
+              <TabsContent value="charts" className="mt-6">
+                <BeforeAfterCharts result={result} />
               </TabsContent>
 
               <TabsContent value="preview" className="mt-6 space-y-4">

@@ -315,17 +315,24 @@ export function analyzeCategorical(values: string[], totalRows: number): Categor
     normalizedGroups.get(normalized)!.push(val);
   });
   
-  // Common normalization mappings for gender, status, etc.
+  // GENDER DATA INTEGRITY RULE:
+  // Gender is a non-inferable categorical field.
+  // Only normalize explicitly known values - NEVER infer from names, patterns, or frequencies.
+  // This is a STRICT EXPLICIT MAPPING - only these exact values are normalized.
+  const genderExplicitMappings: Record<string, string> = {
+    'm': 'Male', 'male': 'Male', 'M': 'Male', 'MALE': 'Male', 'Male': 'Male',
+    'f': 'Female', 'female': 'Female', 'F': 'Female', 'FEMALE': 'Female', 'Female': 'Female',
+  };
+  
+  // Common normalization mappings for non-protected fields
   const commonMappings: Record<string, string[]> = {
-    'Male': ['m', 'male', 'man', 'boy', 'M', 'MALE', 'Male'],
-    'Female': ['f', 'female', 'woman', 'girl', 'F', 'FEMALE', 'Female'],
     'Yes': ['y', 'yes', 'YES', 'Yes', 'true', 'TRUE', 'True', '1'],
     'No': ['n', 'no', 'NO', 'No', 'false', 'FALSE', 'False', '0'],
     'Active': ['active', 'ACTIVE', 'Active', 'enabled', 'on'],
     'Inactive': ['inactive', 'INACTIVE', 'Inactive', 'disabled', 'off'],
   };
   
-  // Apply common mappings
+  // Apply common mappings (excluding gender - handled separately with strict rules)
   uniqueValues.forEach(val => {
     const lowerVal = val.toLowerCase().trim();
     for (const [canonical, variants] of Object.entries(commonMappings)) {
@@ -334,6 +341,18 @@ export function analyzeCategorical(values: string[], totalRows: number): Categor
         if (!inconsistentValues.includes(val)) {
           inconsistentValues.push(val);
         }
+      }
+    }
+  });
+  
+  // Store gender explicit mappings for use by the cleaner
+  // These are the ONLY valid gender normalizations
+  uniqueValues.forEach(val => {
+    const trimmedVal = val.trim();
+    if (genderExplicitMappings[trimmedVal] && val !== genderExplicitMappings[trimmedVal]) {
+      normalizedMappings[val] = genderExplicitMappings[trimmedVal];
+      if (!inconsistentValues.includes(val)) {
+        inconsistentValues.push(val);
       }
     }
   });
