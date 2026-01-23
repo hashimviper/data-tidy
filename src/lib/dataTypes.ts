@@ -16,10 +16,29 @@ export type ColumnClassification =
   | 'time_series_numeric'
   | 'non_time_numeric'
   | 'categorical'
+  | 'sensitive_categorical'  // Gender, ethnicity - no inference allowed
   | 'identifier'
   | 'text'
   | 'boolean'
   | 'derived';
+
+// Data Integrity Policy - fields that must NEVER be inferred
+export interface DataIntegrityPolicy {
+  nonInferableFields: string[];  // Column patterns that cannot be inferred
+  sensitiveCategories: string[]; // Protected categorical fields
+  identifierPatterns: string[];  // ID fields - flag only, never impute
+  allowedGenderValues: Record<string, string>; // Explicit gender mappings only
+}
+
+export const DEFAULT_INTEGRITY_POLICY: DataIntegrityPolicy = {
+  nonInferableFields: ['gender', 'sex', 'name', 'first_name', 'last_name', 'full_name', 'employee_name', 'customer_name'],
+  sensitiveCategories: ['gender', 'sex', 'ethnicity', 'race', 'religion', 'disability', 'nationality'],
+  identifierPatterns: ['id', '_id', 'uuid', 'guid', 'key', 'code', 'number', 'no', 'index'],
+  allowedGenderValues: {
+    'm': 'Male', 'male': 'Male', 'M': 'Male', 'MALE': 'Male', 'Male': 'Male',
+    'f': 'Female', 'female': 'Female', 'F': 'Female', 'FEMALE': 'Female', 'Female': 'Female',
+  }
+};
 
 export interface ColumnProfile {
   name: string;
@@ -36,6 +55,12 @@ export interface ColumnProfile {
   issues: ColumnIssue[];
   isTimeSeries: boolean;
   isDerived: boolean;
+  // Enterprise features
+  isSensitive: boolean;          // Protected from inference
+  isNonInferable: boolean;       // Cannot be statistically imputed
+  qualityScore: number;          // 0-100 quality score per column
+  imputedCount: number;          // Number of imputed values
+  imputedFromDate?: boolean;     // Derived from imputed date
 }
 
 export interface NumericStats {
@@ -72,9 +97,10 @@ export interface DateInfo {
 }
 
 export interface ColumnIssue {
-  type: 'missing' | 'outlier' | 'inconsistent' | 'invalid_type' | 'invalid_range' | 'encoding' | 'invalid_date';
+  type: 'missing' | 'outlier' | 'inconsistent' | 'invalid_type' | 'invalid_range' | 'encoding' | 'invalid_date' | 'flagged_missing_id' | 'protected_field';
   count: number;
   description: string;
+  severity?: 'info' | 'warning' | 'critical';
 }
 
 export interface CleaningConfig {
@@ -160,6 +186,19 @@ export interface CleaningAction {
   description: string;
   count: number;
   details?: string[];
+  policyApplied?: string;  // Which integrity policy was applied
+}
+
+// Per-column quality metrics for transparency
+export interface ColumnQualityMetrics {
+  columnName: string;
+  qualityScore: number;        // 0-100
+  missingPercent: number;
+  invalidPercent: number;
+  imputedPercent: number;
+  outliersPercent: number;
+  isProtected: boolean;
+  protectionReason?: string;
 }
 
 export interface EnhancedCleaningResult {
@@ -170,6 +209,12 @@ export interface EnhancedCleaningResult {
   actions: CleaningAction[];
   summary: CleaningSummary;
   derivedColumns: string[];
+  // Enterprise features
+  integrityPolicy: DataIntegrityPolicy;
+  columnQualityMetrics: ColumnQualityMetrics[];
+  protectedFields: string[];
+  flaggedIds: { column: string; count: number }[];
+  derivedFromImputed: string[];  // Columns derived from imputed dates
 }
 
 export interface CleaningSummary {
