@@ -334,7 +334,11 @@ const Index = () => {
                   <CleaningSummaryPanel 
                     summary={result.summary} 
                     actions={result.actions} 
-                    profile={result.profile} 
+                    profile={result.profile}
+                    columnQualityMetrics={result.columnQualityMetrics}
+                    protectedFields={result.protectedFields}
+                    flaggedIds={result.flaggedIds}
+                    derivedFromImputed={result.derivedFromImputed}
                   />
                 </TabsContent>
 

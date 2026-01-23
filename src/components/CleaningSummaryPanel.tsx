@@ -1,20 +1,35 @@
-import { CleaningSummary, CleaningAction, DatasetProfile } from '@/lib/dataTypes';
+import { CleaningSummary, CleaningAction, DatasetProfile, ColumnQualityMetrics, EnhancedCleaningResult } from '@/lib/dataTypes';
 import { 
   Rows, Columns, Copy, AlertCircle, Type, Zap, Calendar, 
   CheckCircle2, TrendingUp, Filter, Layers, BarChart3,
   Database, Sparkles, ArrowRight, Clock, FileText, 
-  Gauge, Activity, Info, CalendarDays, Hash
+  Gauge, Activity, Info, CalendarDays, Hash, Shield, Lock,
+  AlertTriangle, Flag, Eye
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface CleaningSummaryPanelProps {
   summary: CleaningSummary;
   actions: CleaningAction[];
   profile: DatasetProfile;
+  // Enterprise features
+  columnQualityMetrics?: ColumnQualityMetrics[];
+  protectedFields?: string[];
+  flaggedIds?: { column: string; count: number }[];
+  derivedFromImputed?: string[];
 }
 
-export function CleaningSummaryPanel({ summary, actions, profile }: CleaningSummaryPanelProps) {
+export function CleaningSummaryPanel({ 
+  summary, 
+  actions, 
+  profile,
+  columnQualityMetrics = [],
+  protectedFields = [],
+  flaggedIds = [],
+  derivedFromImputed = []
+}: CleaningSummaryPanelProps) {
   const hasChanges = summary.totalChanges > 0;
   const { dataDescription } = profile;
 
@@ -175,6 +190,104 @@ export function CleaningSummaryPanel({ summary, actions, profile }: CleaningSumm
           )}
         </div>
       </div>
+
+      {/* Data Integrity Policy Panel - Enterprise Feature */}
+      {(protectedFields.length > 0 || flaggedIds.length > 0 || derivedFromImputed.length > 0) && (
+        <div className="glass-card rounded-xl p-5 border-2 border-warning/20">
+          <h4 className="font-semibold text-foreground mb-4 flex items-center gap-2">
+            <Shield className="w-4 h-4 text-warning" />
+            Data Integrity Policy Applied
+          </h4>
+          
+          {protectedFields.length > 0 && (
+            <div className="mb-4">
+              <h5 className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
+                <Lock className="w-3.5 h-3.5 text-warning" />
+                Protected Fields (No Inference)
+              </h5>
+              <div className="flex flex-wrap gap-2">
+                {protectedFields.map((field, idx) => (
+                  <Badge key={idx} variant="outline" className="bg-warning/10 text-warning border-warning/30">
+                    {field}
+                  </Badge>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground mt-2">
+                These fields are protected from statistical inference. Missing values set to "Unknown".
+              </p>
+            </div>
+          )}
+          
+          {flaggedIds.length > 0 && (
+            <div className="mb-4">
+              <h5 className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
+                <Flag className="w-3.5 h-3.5 text-destructive" />
+                Flagged Missing Identifiers
+              </h5>
+              <div className="space-y-1">
+                {flaggedIds.map((item, idx) => (
+                  <div key={idx} className="text-sm text-muted-foreground flex items-center gap-2">
+                    <AlertTriangle className="w-3.5 h-3.5 text-destructive" />
+                    <span>{item.column}: {item.count} missing (not imputed per policy)</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          
+          {derivedFromImputed.length > 0 && (
+            <div>
+              <h5 className="text-sm font-medium text-foreground mb-2 flex items-center gap-2">
+                <Eye className="w-3.5 h-3.5 text-primary" />
+                Derived from Imputed Dates
+              </h5>
+              <div className="flex flex-wrap gap-1">
+                {derivedFromImputed.slice(0, 5).map((col, idx) => (
+                  <Badge key={idx} variant="secondary" className="text-xs">
+                    {col}
+                  </Badge>
+                ))}
+                {derivedFromImputed.length > 5 && (
+                  <Badge variant="outline" className="text-xs">+{derivedFromImputed.length - 5} more</Badge>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Column Quality Scores - Enterprise Feature */}
+      {columnQualityMetrics.length > 0 && (
+        <div className="glass-card rounded-xl p-5">
+          <h4 className="font-semibold text-foreground mb-4 flex items-center gap-2">
+            <Gauge className="w-4 h-4 text-primary" />
+            Per-Column Quality Scores
+          </h4>
+          <div className="grid gap-2 max-h-[300px] overflow-y-auto">
+            {columnQualityMetrics.slice(0, 10).map((metric, idx) => (
+              <div key={idx} className="flex items-center gap-3 p-2 rounded-lg bg-muted/20">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium truncate">{metric.columnName}</span>
+                    {metric.isProtected && (
+                      <Lock className="w-3 h-3 text-warning flex-shrink-0" />
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <Progress value={metric.qualityScore} className="w-20 h-2" />
+                  <Badge 
+                    variant={metric.qualityScore >= 80 ? 'default' : metric.qualityScore >= 60 ? 'secondary' : 'destructive'}
+                    className="font-mono text-xs w-12 justify-center"
+                  >
+                    {metric.qualityScore}%
+                  </Badge>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Cleaning Highlights */}
       {dataDescription.cleaningHighlights.length > 0 && (

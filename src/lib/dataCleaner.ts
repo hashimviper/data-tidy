@@ -1,4 +1,4 @@
-// Advanced data cleaning engine with zero-blank logic and time-series support
+// Advanced data cleaning engine with zero-blank logic, time-series support, and enterprise features
 
 import {
   CleaningConfig,
@@ -7,14 +7,20 @@ import {
   CleaningSummary,
   DatasetProfile,
   DEFAULT_CLEANING_CONFIG,
-  ColumnProfile
+  ColumnProfile,
+  DEFAULT_INTEGRITY_POLICY,
+  DataIntegrityPolicy,
+  ColumnQualityMetrics
 } from './dataTypes';
 import {
   profileColumn,
   detectDatasetType,
   suggestVisualizationFeatures,
   parseMultiFormatDate,
-  generateDataDescription
+  generateDataDescription,
+  isSensitiveColumn,
+  isNonInferableColumn,
+  isIdentifierColumn
 } from './dataAnalyzer';
 
 type DataRow = Record<string, unknown>;
@@ -193,9 +199,23 @@ export function cleanDataAdvanced(
       config: fullConfig,
       actions: [],
       summary: createEmptySummary(),
-      derivedColumns: []
+      derivedColumns: [],
+      // Enterprise features
+      integrityPolicy: DEFAULT_INTEGRITY_POLICY,
+      columnQualityMetrics: [],
+      protectedFields: [],
+      flaggedIds: [],
+      derivedFromImputed: []
     };
   }
+  
+  // Enterprise tracking variables
+  const integrityPolicy = DEFAULT_INTEGRITY_POLICY;
+  const protectedFields: string[] = [];
+  const flaggedIds: { column: string; count: number }[] = [];
+  const derivedFromImputed: string[] = [];
+  const columnImputationCounts: Record<string, number> = {};
+  const imputedDates: Set<number> = new Set(); // Track row indices with imputed dates
   
   let cleanedData = data.map(row => ({ ...row }));
   const originalColumns = Object.keys(data[0]);
@@ -338,7 +358,7 @@ export function cleanDataAdvanced(
         filledDates = parsedDates.map(d => d || medianDate || new Date());
       }
       
-      // Apply fixed dates
+      // Apply fixed dates and track which rows had imputed dates
       cleanedData.forEach((row, idx) => {
         const originalVal = row[profile.name];
         const newDate = filledDates[idx];
@@ -347,6 +367,8 @@ export function cleanDataAdvanced(
           row[profile.name] = newDate.toISOString().split('T')[0];
           fixedCount++;
           datesFixed++;
+          imputedDates.add(idx); // Track this row as having an imputed date
+          columnImputationCounts[profile.name] = (columnImputationCounts[profile.name] || 0) + 1;
         } else if (parsedDates[idx]) {
           row[profile.name] = parsedDates[idx]!.toISOString().split('T')[0];
         }
@@ -420,35 +442,49 @@ export function cleanDataAdvanced(
     }
   }
   
-  // Step 7: Normalize categorical values with GENDER DATA INTEGRITY RULE
-  // Gender columns are treated as non-inferable - only explicit values are normalized
+  // Step 7: Normalize categorical values with DATA INTEGRITY POLICY
+  // Sensitive fields (gender, ethnicity, etc.) are protected from inference
   if (fullConfig.normalizeCategorical) {
     const normalizations: string[] = [];
-    
-    // GENDER DATA INTEGRITY: Define protected column patterns
-    const protectedColumnPatterns = ['gender', 'sex'];
-    
-    // STRICT gender mappings - ONLY these explicit values are valid
-    const genderExplicitMappings: Record<string, string> = {
-      'm': 'Male', 'male': 'Male', 'M': 'Male', 'MALE': 'Male', 'Male': 'Male',
-      'f': 'Female', 'female': 'Female', 'F': 'Female', 'FEMALE': 'Female', 'Female': 'Female',
-    };
     
     columnProfiles.forEach(profile => {
       if ((profile.dataType === 'categorical' || profile.dataType === 'text' || profile.dataType === 'boolean') && 
           profile.categoricalInfo) {
         
-        const lowerColName = profile.name.toLowerCase();
-        const isGenderColumn = protectedColumnPatterns.some(p => lowerColName.includes(p));
+        const isSensitive = isSensitiveColumn(profile.name, integrityPolicy);
+        const isNonInferable = isNonInferableColumn(profile.name, integrityPolicy);
+        const isIdentifier = isIdentifierColumn(profile.name, integrityPolicy);
+        
+        // Track protected fields
+        if ((isSensitive || isNonInferable) && !protectedFields.includes(profile.name)) {
+          protectedFields.push(profile.name);
+        }
         
         let normalized = 0;
         
-        if (isGenderColumn) {
-          // GENDER DATA INTEGRITY RULE:
-          // 1. Only normalize explicitly known values (M/male → Male, F/female → Female)
-          // 2. Missing, invalid, or ambiguous values → "Unknown"
-          // 3. NEVER infer gender from names, patterns, frequencies, or other columns
-          // 4. "Unknown" remains a valid filterable category
+        if (isIdentifier) {
+          // IDENTIFIER HANDLING: Flag missing, never impute
+          let missingCount = 0;
+          cleanedData.forEach(row => {
+            if (isEmpty(row[profile.name])) {
+              missingCount++;
+            }
+          });
+          
+          if (missingCount > 0) {
+            flaggedIds.push({ column: profile.name, count: missingCount });
+            actions.push({
+              type: 'flag_missing_ids',
+              column: profile.name,
+              description: `Flagged ${missingCount} missing identifiers (not imputed per policy)`,
+              count: missingCount,
+              policyApplied: 'Non-inferable identifier field'
+            });
+          }
+        } else if (isSensitive) {
+          // SENSITIVE CATEGORICAL: Only explicit normalization, no inference
+          // Use the policy's allowed mappings for gender
+          const genderMappings = integrityPolicy.allowedGenderValues;
           
           cleanedData.forEach(row => {
             const val = row[profile.name];
@@ -458,21 +494,51 @@ export function cleanDataAdvanced(
               // Missing → Unknown (no inference)
               row[profile.name] = 'Unknown';
               normalized++;
-            } else if (genderExplicitMappings[strVal]) {
+              columnImputationCounts[profile.name] = (columnImputationCounts[profile.name] || 0) + 1;
+            } else if (genderMappings[strVal]) {
               // Explicit known value → normalize
-              if (strVal !== genderExplicitMappings[strVal]) {
-                row[profile.name] = genderExplicitMappings[strVal];
+              if (strVal !== genderMappings[strVal]) {
+                row[profile.name] = genderMappings[strVal];
                 normalized++;
               }
             } else {
               // Invalid/ambiguous value → Unknown (no inference)
               row[profile.name] = 'Unknown';
               normalized++;
+              columnImputationCounts[profile.name] = (columnImputationCounts[profile.name] || 0) + 1;
             }
           });
           
           if (normalized > 0) {
-            normalizations.push(`${profile.name}: ${normalized} values (gender integrity rule applied)`);
+            normalizations.push(`${profile.name}: ${normalized} values (integrity policy: sensitive field)`);
+            actions.push({
+              type: 'sensitive_field_handling',
+              column: profile.name,
+              description: `Protected sensitive field: only explicit values normalized`,
+              count: normalized,
+              policyApplied: 'Sensitive categorical - no inference'
+            });
+          }
+        } else if (isNonInferable) {
+          // NON-INFERABLE: Names, etc. - only normalization, missing → Unknown
+          cleanedData.forEach(row => {
+            const val = row[profile.name];
+            if (isEmpty(val)) {
+              row[profile.name] = 'Unknown';
+              normalized++;
+              columnImputationCounts[profile.name] = (columnImputationCounts[profile.name] || 0) + 1;
+            } else if (typeof val === 'string') {
+              // Just trim and standardize case for names
+              const trimmed = val.trim();
+              if (trimmed !== val) {
+                row[profile.name] = trimmed;
+                normalized++;
+              }
+            }
+          });
+          
+          if (normalized > 0) {
+            normalizations.push(`${profile.name}: ${normalized} values (non-inferable field)`);
           }
         } else {
           // Standard normalization for non-protected columns
@@ -496,7 +562,7 @@ export function cleanDataAdvanced(
     if (normalizations.length > 0) {
       actions.push({
         type: 'normalize_categorical',
-        description: 'Normalized categorical values (gender uses strict integrity rules)',
+        description: 'Normalized categorical values (integrity policy applied)',
         count: normalizations.length,
         details: normalizations
       });
@@ -717,9 +783,16 @@ export function cleanDataAdvanced(
       const fallbackMonthName = monthNames[medianDate.getMonth()];
       const fallbackDayOfWeek = dayNames[medianDate.getDay()];
       
-      cleanedData.forEach(row => {
+      let derivedFromImputedCount = 0;
+      
+      cleanedData.forEach((row, idx) => {
         const val = row[profile.name];
         const { date } = parseMultiFormatDate(val);
+        const isFromImputedDate = imputedDates.has(idx);
+        
+        if (isFromImputedDate) {
+          derivedFromImputedCount++;
+        }
         
         if (date) {
           row[yearCol] = date.getFullYear();
@@ -738,9 +811,19 @@ export function cleanDataAdvanced(
       });
       
       derivedColumns.push(yearCol, quarterCol, monthCol, monthNameCol, dayOfWeekCol);
+      
+      // Track which derived columns came from imputed dates
+      if (derivedFromImputedCount > 0) {
+        derivedFromImputed.push(yearCol, quarterCol, monthCol, monthNameCol, dayOfWeekCol);
+      }
     });
     
     if (derivedColumns.length > 0) {
+      const derivedDetails = [...derivedColumns];
+      if (derivedFromImputed.length > 0) {
+        derivedDetails.push(`(${derivedFromImputed.length} derived from imputed dates)`);
+      }
+      
       actions.push({
         type: 'create_derived',
         description: 'Created derived date columns (Year, Quarter, Month, Day of Week)',
@@ -863,11 +946,47 @@ export function cleanDataAdvanced(
     }
   }
   
-  // Re-profile cleaned data
+  // Re-profile cleaned data with enterprise features
   const finalColumns = Object.keys(cleanedData[0] || {});
   const finalProfiles = finalColumns.map(col => {
     const values = cleanedData.map(row => row[col]);
-    return profileColumn(col, values, dateColumnNames);
+    const profile = profileColumn(col, values, dateColumnNames, integrityPolicy);
+    
+    // Update imputation count
+    profile.imputedCount = columnImputationCounts[col] || 0;
+    
+    // Check if this is a derived column from imputed date
+    if (derivedFromImputed.includes(col)) {
+      profile.imputedFromDate = true;
+    }
+    
+    // Track protected fields
+    if (profile.isSensitive && !protectedFields.includes(col)) {
+      protectedFields.push(col);
+    }
+    
+    return profile;
+  });
+  
+  // Generate column quality metrics
+  const columnQualityMetrics: ColumnQualityMetrics[] = finalProfiles.map(profile => {
+    const totalRows = cleanedData.length;
+    return {
+      columnName: profile.name,
+      qualityScore: profile.qualityScore,
+      missingPercent: totalRows > 0 ? Math.round((profile.nullCount / totalRows) * 100) : 0,
+      invalidPercent: profile.issues
+        .filter(i => ['invalid_type', 'invalid_range', 'invalid_date', 'encoding'].includes(i.type))
+        .reduce((sum, i) => sum + i.count, 0) / Math.max(totalRows, 1) * 100,
+      imputedPercent: totalRows > 0 ? Math.round((profile.imputedCount / totalRows) * 100) : 0,
+      outliersPercent: profile.stats ? Math.round((profile.stats.outlierCount / totalRows) * 100) : 0,
+      isProtected: profile.isSensitive || profile.isNonInferable,
+      protectionReason: profile.isSensitive 
+        ? 'Sensitive categorical - no inference allowed' 
+        : profile.isNonInferable 
+          ? 'Non-inferable field - normalization only' 
+          : undefined
+    };
   });
   
   // Detect dataset type and suggest visualization features
@@ -908,7 +1027,13 @@ export function cleanDataAdvanced(
     config: fullConfig,
     actions,
     summary,
-    derivedColumns
+    derivedColumns,
+    // Enterprise features
+    integrityPolicy,
+    columnQualityMetrics,
+    protectedFields,
+    flaggedIds,
+    derivedFromImputed
   };
 }
 

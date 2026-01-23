@@ -8,7 +8,9 @@ import {
   ColumnIssue, 
   DatasetProfile,
   ColumnClassification,
-  DataDescription
+  DataDescription,
+  DEFAULT_INTEGRITY_POLICY,
+  DataIntegrityPolicy
 } from './dataTypes';
 
 // Enhanced date patterns for multi-format parsing
@@ -123,12 +125,33 @@ export function detectTimeSeriesColumn(name: string, values: unknown[], dateColu
   return isNumeric && (isTimeSeriesName || hasDateContext);
 }
 
-// Detect column classification
+// Check if column is sensitive (protected from inference)
+export function isSensitiveColumn(name: string, policy: DataIntegrityPolicy = DEFAULT_INTEGRITY_POLICY): boolean {
+  const lowerName = name.toLowerCase();
+  return policy.sensitiveCategories.some(p => lowerName.includes(p));
+}
+
+// Check if column is non-inferable (cannot be statistically imputed)
+export function isNonInferableColumn(name: string, policy: DataIntegrityPolicy = DEFAULT_INTEGRITY_POLICY): boolean {
+  const lowerName = name.toLowerCase();
+  return policy.nonInferableFields.some(p => lowerName.includes(p));
+}
+
+// Check if column is an identifier
+export function isIdentifierColumn(name: string, policy: DataIntegrityPolicy = DEFAULT_INTEGRITY_POLICY): boolean {
+  const lowerName = name.toLowerCase();
+  return policy.identifierPatterns.some(p => 
+    lowerName === p || lowerName.endsWith('_' + p) || lowerName.startsWith(p + '_') || lowerName.endsWith(p)
+  );
+}
+
+// Detect column classification with sensitive field detection
 export function classifyColumn(
   name: string, 
   values: unknown[], 
   dataType: string,
-  dateColumns: string[]
+  dateColumns: string[],
+  policy: DataIntegrityPolicy = DEFAULT_INTEGRITY_POLICY
 ): ColumnClassification {
   const lowerName = name.toLowerCase();
   
@@ -139,11 +162,13 @@ export function classifyColumn(
     return 'derived';
   }
   
-  // Identifier patterns
-  const idPatterns = ['id', '_id', 'key', 'code', 'uuid', 'guid', 'number', 'no', 'index'];
-  const isIdentifier = idPatterns.some(p => lowerName === p || lowerName.endsWith('_' + p) || lowerName.startsWith(p + '_'));
+  // Check for sensitive categorical (overrides regular categorical)
+  if (isSensitiveColumn(name, policy) && (dataType === 'categorical' || dataType === 'text')) {
+    return 'sensitive_categorical';
+  }
   
-  if (isIdentifier && dataType !== 'date') {
+  // Identifier patterns
+  if (isIdentifierColumn(name, policy) && dataType !== 'date') {
     return 'identifier';
   }
   
@@ -451,17 +476,34 @@ export function analyzeDate(values: unknown[]): DateInfo {
   };
 }
 
-// Profile a single column with enhanced classification
+// Calculate per-column quality score (0-100)
+export function calculateColumnQualityScore(
+  nullCount: number, 
+  totalRows: number, 
+  outlierCount: number = 0,
+  invalidCount: number = 0
+): number {
+  if (totalRows === 0) return 100;
+  
+  const missingPenalty = (nullCount / totalRows) * 40;  // Up to 40 points
+  const outlierPenalty = Math.min((outlierCount / totalRows) * 20, 20);  // Up to 20 points
+  const invalidPenalty = Math.min((invalidCount / totalRows) * 30, 30);  // Up to 30 points
+  
+  return Math.max(0, Math.round(100 - missingPenalty - outlierPenalty - invalidPenalty));
+}
+
+// Profile a single column with enhanced classification and enterprise features
 export function profileColumn(
   name: string, 
   values: unknown[], 
-  dateColumns: string[] = []
+  dateColumns: string[] = [],
+  policy: DataIntegrityPolicy = DEFAULT_INTEGRITY_POLICY
 ): ColumnProfile {
   const nonNullValues = values.filter(v => v !== null && v !== undefined && v !== '' && 
     (typeof v !== 'string' || v.trim() !== ''));
   
   const dataType = detectColumnType(values);
-  const classification = classifyColumn(name, values, dataType, dateColumns);
+  const classification = classifyColumn(name, values, dataType, dateColumns, policy);
   const uniqueValues = new Set(nonNullValues.map(v => String(v)));
   const uniqueRatio = uniqueValues.size / Math.max(nonNullValues.length, 1);
   
@@ -473,13 +515,39 @@ export function profileColumn(
     issues.push({
       type: 'missing',
       count: nullCount,
-      description: `${nullCount} missing values (${((nullCount / values.length) * 100).toFixed(1)}%)`
+      description: `${nullCount} missing values (${((nullCount / values.length) * 100).toFixed(1)}%)`,
+      severity: nullCount / values.length > 0.3 ? 'warning' : 'info'
+    });
+  }
+  
+  // Check for sensitive/protected fields
+  const isSensitive = isSensitiveColumn(name, policy);
+  const isNonInferable = isNonInferableColumn(name, policy);
+  
+  if (isSensitive) {
+    issues.push({
+      type: 'protected_field',
+      count: 0,
+      description: `Protected field: no statistical inference allowed`,
+      severity: 'info'
+    });
+  }
+  
+  // Flag missing identifiers
+  if (classification === 'identifier' && nullCount > 0) {
+    issues.push({
+      type: 'flagged_missing_id',
+      count: nullCount,
+      description: `${nullCount} missing identifiers flagged (not imputed)`,
+      severity: 'warning'
     });
   }
   
   let stats: NumericStats | undefined;
   let categoricalInfo: CategoricalInfo | undefined;
   let dateInfo: DateInfo | undefined;
+  let outlierCount = 0;
+  let invalidCount = 0;
   
   if (dataType === 'numeric') {
     const numericValues = nonNullValues
@@ -487,21 +555,26 @@ export function profileColumn(
       .filter(v => !isNaN(v));
     
     stats = calculateNumericStats(numericValues);
+    outlierCount = stats.outlierCount;
     
     if (stats.outlierCount > 0) {
       issues.push({
         type: 'outlier',
         count: stats.outlierCount,
-        description: `${stats.outlierCount} outliers detected (IQR method)`
+        description: `${stats.outlierCount} outliers detected (IQR method)`,
+        severity: stats.outlierCount / numericValues.length > 0.1 ? 'warning' : 'info'
       });
     }
     
     const positiveOnlyPatterns = ['price', 'cost', 'amount', 'quantity', 'qty', 'count', 'age', 'revenue', 'sales', 'units', 'weight'];
     if (positiveOnlyPatterns.some(p => name.toLowerCase().includes(p)) && stats.min < 0) {
+      const negativeCount = numericValues.filter(v => v < 0).length;
+      invalidCount += negativeCount;
       issues.push({
         type: 'invalid_range',
-        count: numericValues.filter(v => v < 0).length,
-        description: `Unexpected negative values in "${name}"`
+        count: negativeCount,
+        description: `Unexpected negative values in "${name}"`,
+        severity: 'warning'
       });
     }
   }
@@ -514,16 +587,19 @@ export function profileColumn(
       issues.push({
         type: 'inconsistent',
         count: categoricalInfo.inconsistentValues.length,
-        description: `${categoricalInfo.inconsistentValues.length} inconsistent value variations`
+        description: `${categoricalInfo.inconsistentValues.length} inconsistent value variations`,
+        severity: 'info'
       });
     }
     
     const encodingIssues = stringValues.filter(v => /[^\x00-\x7F]/.test(v) && /�|Ã|â€/.test(v));
     if (encodingIssues.length > 0) {
+      invalidCount += encodingIssues.length;
       issues.push({
         type: 'encoding',
         count: encodingIssues.length,
-        description: `${encodingIssues.length} values with encoding issues`
+        description: `${encodingIssues.length} values with encoding issues`,
+        severity: 'warning'
       });
     }
   }
@@ -532,16 +608,19 @@ export function profileColumn(
     dateInfo = analyzeDate(values);
     
     if (dateInfo.invalidDates > 0) {
+      invalidCount += dateInfo.invalidDates;
       issues.push({
         type: 'invalid_date',
         count: dateInfo.invalidDates,
-        description: `${dateInfo.invalidDates} invalid date values`
+        description: `${dateInfo.invalidDates} invalid date values`,
+        severity: 'warning'
       });
     }
   }
   
   const isTimeSeries = classification === 'time_series_numeric';
   const isDerived = classification === 'derived';
+  const qualityScore = calculateColumnQualityScore(nullCount, values.length, outlierCount, invalidCount);
   
   return {
     name,
@@ -557,7 +636,13 @@ export function profileColumn(
     dateInfo,
     issues,
     isTimeSeries,
-    isDerived
+    isDerived,
+    // Enterprise features
+    isSensitive,
+    isNonInferable,
+    qualityScore,
+    imputedCount: 0,  // Will be updated by cleaner
+    imputedFromDate: false
   };
 }
 
