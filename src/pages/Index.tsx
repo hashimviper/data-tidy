@@ -7,6 +7,7 @@ import { CleaningProgress } from '@/components/CleaningProgress';
 import { CleaningConfigPanel } from '@/components/CleaningConfigPanel';
 import { ColumnConfigPanel, ColumnOverride } from '@/components/ColumnConfigPanel';
 import { CleaningSummaryPanel } from '@/components/CleaningSummaryPanel';
+import { SchemaMappingPanel } from '@/components/SchemaMappingPanel';
 import { ExportPanel } from '@/components/ExportPanel';
 import { DataTable } from '@/components/DataTable';
 import { BeforeAfterCharts } from '@/components/BeforeAfterCharts';
@@ -16,8 +17,9 @@ import { QuickStats } from '@/components/QuickStats';
 import { InteractiveUpload } from '@/components/InteractiveUpload';
 import { cleanDataAdvanced } from '@/lib/dataCleaner';
 import { profileColumn } from '@/lib/dataAnalyzer';
+import { autoTransform, SchemaValidationResult, DataQualitySummary } from '@/lib/schemaEngine';
 import { CleaningConfig, DEFAULT_CLEANING_CONFIG, EnhancedCleaningResult, ColumnProfile } from '@/lib/dataTypes';
-import { Sparkles, Download, BarChart3, Table, FileText, Settings2 } from 'lucide-react';
+import { Sparkles, Download, BarChart3, Table, FileText, Settings2, Layers } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
@@ -43,6 +45,8 @@ const Index = () => {
   const [columnProfiles, setColumnProfiles] = useState<ColumnProfile[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState('summary');
+  const [schemaValidation, setSchemaValidation] = useState<SchemaValidationResult | null>(null);
+  const [qualitySummary, setQualitySummary] = useState<DataQualitySummary | null>(null);
 
   const readExcelWorkbook = (file: File): Promise<ExcelWorkbook> => {
     return new Promise((resolve, reject) => {
@@ -84,7 +88,17 @@ const Index = () => {
   const handleCleaningComplete = () => {
     if (rawData) {
       try {
-        const cleaningResult = cleanDataAdvanced(rawData, config);
+        // Run schema engine (auto-infers schema, validates, transforms with idempotency)
+        const { validationResult, transformationResult } = autoTransform(rawData);
+        setSchemaValidation(validationResult);
+        
+        if (transformationResult) {
+          setQualitySummary(transformationResult.qualitySummary);
+        }
+
+        // Run the full cleaning pipeline on successfully transformed data
+        const dataToClean = transformationResult ? transformationResult.data : rawData;
+        const cleaningResult = cleanDataAdvanced(dataToClean, config);
         setResult(cleaningResult);
         setCurrentStep(4);
       } catch (err) {
@@ -189,6 +203,8 @@ const Index = () => {
     setColumnOverrides({});
     setColumnProfiles([]);
     setActiveTab('summary');
+    setSchemaValidation(null);
+    setQualitySummary(null);
   };
 
   const handleNavigate = (step: number) => {
@@ -320,6 +336,12 @@ const Index = () => {
                     <FileText className="w-4 h-4" />
                     Summary
                   </TabsTrigger>
+                  {schemaValidation && (
+                    <TabsTrigger value="schema" className="gap-2">
+                      <Layers className="w-4 h-4" />
+                      Schema
+                    </TabsTrigger>
+                  )}
                   <TabsTrigger value="charts" className="gap-2">
                     <BarChart3 className="w-4 h-4" />
                     Charts
@@ -341,6 +363,15 @@ const Index = () => {
                     derivedFromImputed={result.derivedFromImputed}
                   />
                 </TabsContent>
+
+                {schemaValidation && (
+                  <TabsContent value="schema" className="mt-6">
+                    <SchemaMappingPanel 
+                      validation={schemaValidation} 
+                      qualitySummary={qualitySummary} 
+                    />
+                  </TabsContent>
+                )}
 
                 <TabsContent value="charts" className="mt-6">
                   <BeforeAfterCharts result={result} />
