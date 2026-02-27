@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 interface CleaningProgressProps {
   isProcessing: boolean;
   onComplete?: () => void;
+  aiStatusMessage?: string;
 }
 
 interface ProgressStep {
@@ -24,7 +25,7 @@ const CLEANING_STEPS: ProgressStep[] = [
   { id: 'complete', label: 'Finalizing', icon: <CheckCircle2 className="w-4 h-4" />, duration: 200 },
 ];
 
-export function CleaningProgress({ isProcessing, onComplete }: CleaningProgressProps) {
+export function CleaningProgress({ isProcessing, onComplete, aiStatusMessage }: CleaningProgressProps) {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [progress, setProgress] = useState(0);
   const [stepProgress, setStepProgress] = useState(0);
@@ -102,7 +103,7 @@ export function CleaningProgress({ isProcessing, onComplete }: CleaningProgressP
             {currentStep?.label || 'Processing...'}
           </h3>
           <p className="text-sm text-muted-foreground">
-            Please wait while we prepare your data
+            {aiStatusMessage || 'Please wait while we prepare your data'}
           </p>
         </div>
 
