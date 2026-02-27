@@ -18,8 +18,10 @@ import { InteractiveUpload } from '@/components/InteractiveUpload';
 import { cleanDataAdvanced } from '@/lib/dataCleaner';
 import { profileColumn } from '@/lib/dataAnalyzer';
 import { autoTransform, SchemaValidationResult, DataQualitySummary } from '@/lib/schemaEngine';
+import { cleanWithGroq, GroqCleaningResult, GroqProgressCallback } from '@/lib/groqCleaner';
 import { CleaningConfig, DEFAULT_CLEANING_CONFIG, EnhancedCleaningResult, ColumnProfile } from '@/lib/dataTypes';
-import { Sparkles, Download, BarChart3, Table, FileText, Settings2, Layers } from 'lucide-react';
+import { Sparkles, Download, BarChart3, Table, FileText, Settings2, Layers, Brain } from 'lucide-react';
+import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
@@ -47,6 +49,9 @@ const Index = () => {
   const [activeTab, setActiveTab] = useState('summary');
   const [schemaValidation, setSchemaValidation] = useState<SchemaValidationResult | null>(null);
   const [qualitySummary, setQualitySummary] = useState<DataQualitySummary | null>(null);
+  const [useAiCleaning, setUseAiCleaning] = useState(false);
+  const [aiStatusMessage, setAiStatusMessage] = useState<string | undefined>(undefined);
+  const [groqResult, setGroqResult] = useState<GroqCleaningResult | null>(null);
 
   const readExcelWorkbook = (file: File): Promise<ExcelWorkbook> => {
     return new Promise((resolve, reject) => {
@@ -85,27 +90,62 @@ const Index = () => {
     }
   };
 
-  const handleCleaningComplete = () => {
-    if (rawData) {
-      try {
-        // Run schema engine (auto-infers schema, validates, transforms with idempotency)
-        const { validationResult, transformationResult } = autoTransform(rawData);
-        setSchemaValidation(validationResult);
-        
-        if (transformationResult) {
-          setQualitySummary(transformationResult.qualitySummary);
-        }
+  const handleCleaningComplete = async () => {
+    if (!rawData) {
+      setIsProcessing(false);
+      return;
+    }
 
-        // Run the full cleaning pipeline on successfully transformed data
-        const dataToClean = transformationResult ? transformationResult.data : rawData;
-        const cleaningResult = cleanDataAdvanced(dataToClean, config);
-        setResult(cleaningResult);
-        setCurrentStep(4);
-      } catch (err) {
-        setError('Error processing data. Please check your file format.');
+    try {
+      // Run schema engine
+      const { validationResult, transformationResult } = autoTransform(rawData);
+      setSchemaValidation(validationResult);
+      if (transformationResult) {
+        setQualitySummary(transformationResult.qualitySummary);
       }
+
+      let dataToClean = transformationResult ? transformationResult.data : rawData;
+
+      // AI cleaning with Groq if enabled
+      if (useAiCleaning) {
+        const onProgress: GroqProgressCallback = (info) => {
+          setAiStatusMessage(info.message);
+          if (info.phase === 'retrying' && info.message.includes('Rate limited')) {
+            toast({
+              title: 'Groq API limit reached',
+              description: 'Retrying in 5 seconds...',
+              variant: 'destructive',
+            });
+          }
+        };
+
+        try {
+          const aiResult = await cleanWithGroq(dataToClean, onProgress);
+          setGroqResult(aiResult);
+          if (aiResult.data.length > 0) {
+            dataToClean = aiResult.data;
+          }
+          if (aiResult.errorLog.length > 0) {
+            toast({
+              title: `${aiResult.failedRows} rows failed AI cleaning`,
+              description: aiResult.errorLog.map(e => e.error).join('; ').slice(0, 100),
+              variant: 'destructive',
+            });
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Unknown AI error';
+          toast({ title: 'AI Cleaning Failed', description: msg, variant: 'destructive' });
+        }
+      }
+
+      const cleaningResult = cleanDataAdvanced(dataToClean, config);
+      setResult(cleaningResult);
+      setCurrentStep(4);
+    } catch (err) {
+      setError('Error processing data. Please check your file format.');
     }
     setIsProcessing(false);
+    setAiStatusMessage(undefined);
   };
 
   const processSheet = (workbook: XLSX.WorkBook, sheetName: string) => {
@@ -205,6 +245,9 @@ const Index = () => {
     setActiveTab('summary');
     setSchemaValidation(null);
     setQualitySummary(null);
+    setUseAiCleaning(false);
+    setAiStatusMessage(undefined);
+    setGroqResult(null);
   };
 
   const handleNavigate = (step: number) => {
@@ -293,14 +336,33 @@ const Index = () => {
                   )}
                 </div>
 
+                {/* AI Cleaning Toggle */}
+                <div className="mt-4 p-4 rounded-xl border border-border bg-muted/30">
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={useAiCleaning}
+                      onChange={(e) => setUseAiCleaning(e.target.checked)}
+                      className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
+                    />
+                    <Brain className="w-5 h-5 text-primary" />
+                    <div>
+                      <span className="font-medium text-foreground text-sm">Enable AI Cleaning (Groq + Llama 3)</span>
+                      <p className="text-xs text-muted-foreground">
+                        Uses Llama 3.3-70b to intelligently normalize headers, enforce types, and engineer features like age_group.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+
                 <div className="mt-6 pt-6 border-t border-border flex justify-end">
                   <Button 
                     onClick={startCleaning}
                     size="lg"
                     className="gap-2 px-8 shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all"
                   >
-                    <Sparkles className="w-4 h-4" />
-                    Start Cleaning
+                    {useAiCleaning ? <Brain className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
+                    {useAiCleaning ? 'Start AI Cleaning' : 'Start Cleaning'}
                   </Button>
                 </div>
               </div>
@@ -319,7 +381,7 @@ const Index = () => {
           {/* Step 3: Processing */}
           {currentStep === 3 && (
             <div className="max-w-2xl mx-auto">
-              <CleaningProgress isProcessing={isProcessing} onComplete={handleCleaningComplete} />
+              <CleaningProgress isProcessing={isProcessing} onComplete={handleCleaningComplete} aiStatusMessage={aiStatusMessage} />
             </div>
           )}
 
