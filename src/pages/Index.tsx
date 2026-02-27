@@ -19,6 +19,7 @@ import { cleanDataAdvanced } from '@/lib/dataCleaner';
 import { profileColumn } from '@/lib/dataAnalyzer';
 import { autoTransform, SchemaValidationResult, DataQualitySummary } from '@/lib/schemaEngine';
 import { cleanWithGroq, GroqCleaningResult, GroqProgressCallback } from '@/lib/groqCleaner';
+import { applyContextualTransformations, ContextualReport } from '@/lib/contextualMatcher';
 import { CleaningConfig, DEFAULT_CLEANING_CONFIG, EnhancedCleaningResult, ColumnProfile } from '@/lib/dataTypes';
 import { Sparkles, Download, BarChart3, Table, FileText, Settings2, Layers, Brain } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
@@ -97,14 +98,17 @@ const Index = () => {
     }
 
     try {
-      // Run schema engine
-      const { validationResult, transformationResult } = autoTransform(rawData);
+      // Step 1: Contextual pattern matching (client-side, instant)
+      const { data: contextData, report: ctxReport } = applyContextualTransformations(rawData);
+
+      // Step 2: Run schema engine on contextually-transformed data
+      const { validationResult, transformationResult } = autoTransform(contextData);
       setSchemaValidation(validationResult);
       if (transformationResult) {
         setQualitySummary(transformationResult.qualitySummary);
       }
 
-      let dataToClean = transformationResult ? transformationResult.data : rawData;
+      let dataToClean = transformationResult ? transformationResult.data : contextData;
 
       // AI cleaning with Groq if enabled
       if (useAiCleaning) {
@@ -141,6 +145,16 @@ const Index = () => {
       const cleaningResult = cleanDataAdvanced(dataToClean, config);
       setResult(cleaningResult);
       setCurrentStep(4);
+
+      // Show contextual cleaning report toast
+      const piiNote = ctxReport.piiColumnsMasked.length > 0
+        ? ` Masked ${ctxReport.piiColumnsMasked.length} PII column(s).`
+        : '';
+      const ageNote = ctxReport.ageGroupCreated ? ' Generated age_group column.' : '';
+      toast({
+        title: '✨ Cleaning Report',
+        description: `Detected ${ctxReport.measuresDetected} Measure(s) and ${ctxReport.dimensionsDetected} Dimension(s). Normalized ${ctxReport.missingValuesNormalized} missing values.${piiNote}${ageNote}`,
+      });
     } catch (err) {
       setError('Error processing data. Please check your file format.');
     }
