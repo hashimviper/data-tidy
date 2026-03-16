@@ -15,11 +15,9 @@ import { DashboardSidebar } from '@/components/DashboardSidebar';
 import { DashboardHeader } from '@/components/DashboardHeader';
 import { QuickStats } from '@/components/QuickStats';
 import { InteractiveUpload } from '@/components/InteractiveUpload';
-import { cleanDataAdvanced } from '@/lib/dataCleaner';
 import { profileColumn } from '@/lib/dataAnalyzer';
 import { autoTransform, SchemaValidationResult, DataQualitySummary } from '@/lib/schemaEngine';
-import { cleanWithGroq, GroqCleaningResult, GroqProgressCallback } from '@/lib/groqCleaner';
-import { applyContextualTransformations, ContextualReport } from '@/lib/contextualMatcher';
+import { DataProcessor, type ProcessorResult, type RejectedRow } from '@/lib/processor';
 import { CleaningConfig, DEFAULT_CLEANING_CONFIG, EnhancedCleaningResult, ColumnProfile } from '@/lib/dataTypes';
 import { Sparkles, Download, BarChart3, Table, FileText, Settings2, Layers, Brain } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
@@ -52,7 +50,8 @@ const Index = () => {
   const [qualitySummary, setQualitySummary] = useState<DataQualitySummary | null>(null);
   const [useAiCleaning, setUseAiCleaning] = useState(false);
   const [aiStatusMessage, setAiStatusMessage] = useState<string | undefined>(undefined);
-  const [groqResult, setGroqResult] = useState<GroqCleaningResult | null>(null);
+  const [rejectedRows, setRejectedRows] = useState<RejectedRow[]>([]);
+  const [processorLog, setProcessorLog] = useState<ReturnType<typeof Object> | null>(null);
 
   const readExcelWorkbook = (file: File): Promise<ExcelWorkbook> => {
     return new Promise((resolve, reject) => {
@@ -98,65 +97,54 @@ const Index = () => {
     }
 
     try {
-      // Step 1: Contextual pattern matching (client-side, instant)
-      const { data: contextData, report: ctxReport } = applyContextualTransformations(rawData);
+      // Determine LLM API key: prefer Groq, fallback to Google
+      const groqKey = import.meta.env.VITE_GROQ_API_KEY;
+      const googleKey = import.meta.env.VITE_GOOGLE_API_KEY;
+      const llmProvider = groqKey ? 'groq' as const : 'google' as const;
+      const llmApiKey = groqKey || googleKey;
 
-      // Step 2: Run schema engine on contextually-transformed data
-      const { validationResult, transformationResult } = autoTransform(contextData);
+      const processor = new DataProcessor({
+        cleaningConfig: config,
+        chunkSize: 1000,
+        enableLLM: useAiCleaning && !!llmApiKey,
+        llmProvider,
+        llmApiKey: llmApiKey || undefined,
+        onLLMProgress: (info) => {
+          setAiStatusMessage(info.message);
+          if (info.phase === 'retrying' && info.message.includes('Rate limited')) {
+            toast({ title: 'API rate limit reached', description: 'Retrying...', variant: 'destructive' });
+          }
+        },
+      });
+
+      const processorResult = await processor.process(rawData);
+
+      // Apply schema engine on top
+      const { validationResult, transformationResult } = autoTransform(processorResult.cleanedData);
       setSchemaValidation(validationResult);
       if (transformationResult) {
         setQualitySummary(transformationResult.qualitySummary);
       }
 
-      let dataToClean = transformationResult ? transformationResult.data : contextData;
-
-      // AI cleaning with Groq if enabled
-      if (useAiCleaning) {
-        const onProgress: GroqProgressCallback = (info) => {
-          setAiStatusMessage(info.message);
-          if (info.phase === 'retrying' && info.message.includes('Rate limited')) {
-            toast({
-              title: 'Groq API limit reached',
-              description: 'Retrying in 5 seconds...',
-              variant: 'destructive',
-            });
-          }
-        };
-
-        try {
-          const aiResult = await cleanWithGroq(dataToClean, onProgress);
-          setGroqResult(aiResult);
-          if (aiResult.data.length > 0) {
-            dataToClean = aiResult.data;
-          }
-          if (aiResult.errorLog.length > 0) {
-            toast({
-              title: `${aiResult.failedRows} rows failed AI cleaning`,
-              description: aiResult.errorLog.map(e => e.error).join('; ').slice(0, 100),
-              variant: 'destructive',
-            });
-          }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Unknown AI error';
-          toast({ title: 'AI Cleaning Failed', description: msg, variant: 'destructive' });
-        }
-      }
-
-      const cleaningResult = cleanDataAdvanced(dataToClean, config);
-      setResult(cleaningResult);
+      setResult(processorResult.enhancedResult);
+      setRejectedRows(processorResult.rejectedRows);
+      setProcessorLog(processorResult.log);
       setCurrentStep(4);
 
-      // Show contextual cleaning report toast
-      const piiNote = ctxReport.piiColumnsMasked.length > 0
-        ? ` Masked ${ctxReport.piiColumnsMasked.length} PII column(s).`
-        : '';
-      const ageNote = ctxReport.ageGroupCreated ? ' Generated age_group column.' : '';
+      // Show cleaning report toast
+      const ctx = processorResult.contextualReport;
+      const piiNote = ctx.piiColumnsMasked.length > 0 ? ` Masked ${ctx.piiColumnsMasked.length} PII column(s).` : '';
+      const ageNote = ctx.ageGroupCreated ? ' Generated age_group column.' : '';
+      const rejectedNote = processorResult.rejectedRows.length > 0 ? ` ${processorResult.rejectedRows.length} rows rejected.` : '';
+      const timeNote = ` (${processorResult.log.elapsedMs.toFixed(0)}ms)`;
+
       toast({
         title: '✨ Cleaning Report',
-        description: `Detected ${ctxReport.measuresDetected} Measure(s) and ${ctxReport.dimensionsDetected} Dimension(s). Normalized ${ctxReport.missingValuesNormalized} missing values.${piiNote}${ageNote}`,
+        description: `Detected ${ctx.measuresDetected} Measure(s) and ${ctx.dimensionsDetected} Dimension(s). Normalized ${ctx.missingValuesNormalized} missing values.${piiNote}${ageNote}${rejectedNote}${timeNote}`,
       });
     } catch (err) {
-      setError('Error processing data. Please check your file format.');
+      const msg = err instanceof Error ? err.message : 'Error processing data.';
+      setError(msg);
     }
     setIsProcessing(false);
     setAiStatusMessage(undefined);
@@ -261,7 +249,8 @@ const Index = () => {
     setQualitySummary(null);
     setUseAiCleaning(false);
     setAiStatusMessage(undefined);
-    setGroqResult(null);
+    setRejectedRows([]);
+    setProcessorLog(null);
   };
 
   const handleNavigate = (step: number) => {
