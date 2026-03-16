@@ -8,6 +8,9 @@ type DataRow = Record<string, unknown>;
 
 export type SemanticRole = 'transaction_date' | 'revenue' | 'identity' | 'category' | 'boolean' | 'age' | 'gender' | 'pii' | 'unknown';
 
+// Date-of-birth patterns (should NOT be classified as transaction_date)
+const DOB_PATTERNS = ['date_of_birth', 'dob', 'birth_date', 'birthdate', 'born'];
+
 const HEADER_DICTIONARY: Record<SemanticRole, string[]> = {
   transaction_date: ['date', 'time', 'timestamp', 'created_at', 'trans_', 'order_date', 'purchase_date', 'datetime', 'created', 'updated_at'],
   revenue: ['amount', 'sales', 'price', 'revenue', 'cost', 'total', 'spend', 'income', 'profit', 'fee', 'charge', 'payment', 'value'],
