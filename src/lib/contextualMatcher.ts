@@ -128,6 +128,8 @@ export interface ContextualReport {
   ageGroupCreated: boolean;
   booleansNormalized: number;
   genderNormalized: number;
+  calculatedAgeCreated: boolean;
+  ageImputedCount: number;
 }
 
 export function applyContextualTransformations(data: DataRow[]): ContextualResult {
