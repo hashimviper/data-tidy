@@ -33,6 +33,19 @@ export function classifyHeaders(columns: string[]): HeaderClassification[] {
   return columns.map(col => {
     const lower = col.toLowerCase().replace(/[^a-z0-9_@.]/g, '_');
 
+    // Special case: date_of_birth should NOT be classified as transaction_date
+    const isDob = DOB_PATTERNS.some(p => lower.includes(p));
+    if (isDob) {
+      return { column: col, role: 'transaction_date' as SemanticRole, matchedKeyword: 'dob' };
+    }
+
+    // Special case: age columns should never match 'date' patterns
+    const AGE_EXACT = ['age', 'years_old', 'age_at', 'customer_age', 'employee_age', 'user_age'];
+    const isAge = AGE_EXACT.some(p => lower === p || lower.endsWith('_' + p) || lower.startsWith(p + '_'));
+    if (isAge) {
+      return { column: col, role: 'age' as SemanticRole, matchedKeyword: 'age' };
+    }
+
     for (const [role, keywords] of Object.entries(HEADER_DICTIONARY) as [SemanticRole, string[]][]) {
       if (role === 'unknown') continue;
       for (const kw of keywords) {

@@ -502,7 +502,7 @@ export function profileColumn(
   const nonNullValues = values.filter(v => v !== null && v !== undefined && v !== '' && 
     (typeof v !== 'string' || v.trim() !== ''));
   
-  const dataType = detectColumnType(values);
+  const dataType = detectColumnType(values, name);
   const classification = classifyColumn(name, values, dataType, dateColumns, policy);
   const uniqueValues = new Set(nonNullValues.map(v => String(v)));
   const uniqueRatio = uniqueValues.size / Math.max(nonNullValues.length, 1);
