@@ -37,7 +37,7 @@ export function classifyHeaders(columns: string[]): HeaderClassification[] {
     // Special case: date_of_birth should NOT be classified as transaction_date
     const isDob = DOB_PATTERNS.some(p => lower.includes(p));
     if (isDob) {
-      return { column: col, role: 'transaction_date' as SemanticRole, matchedKeyword: 'dob' };
+      return { column: col, role: 'date_of_birth' as SemanticRole, matchedKeyword: 'dob' };
     }
 
     // Special case: age columns should never match 'date' patterns
