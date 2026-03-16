@@ -20,6 +20,7 @@ const HEADER_DICTIONARY: Record<SemanticRole, string[]> = {
   age: ['age', 'years_old'],
   gender: ['gender', 'sex'],
   pii: ['email', 'mail', 'phone', 'mobile', 'address', 'ssn', 'social_security', 'passport', 'credit_card', 'card_number'],
+  date_of_birth: ['date_of_birth', 'dob', 'birth_date', 'birthdate', 'born'],
   unknown: [],
 };
 
