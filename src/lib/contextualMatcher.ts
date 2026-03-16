@@ -146,6 +146,8 @@ export function applyContextualTransformations(data: DataRow[]): ContextualResul
         ageGroupCreated: false,
         booleansNormalized: 0,
         genderNormalized: 0,
+        calculatedAgeCreated: false,
+        ageImputedCount: 0,
       },
     };
   }
@@ -161,11 +163,15 @@ export function applyContextualTransformations(data: DataRow[]): ContextualResul
   let missingValuesNormalized = 0;
   let booleansNormalized = 0;
   let genderNormalized = 0;
+  let ageImputedCount = 0;
   const piiColumnsMasked: string[] = [];
   let ageGroupCreated = false;
+  let calculatedAgeCreated = false;
 
-  // Detect age column by role OR by inference
+  // Detect columns by role
   const ageColumn = headerClassifications.find(h => h.role === 'age')?.column ?? null;
+  const dobColumn = headerClassifications.find(h => h.role === 'date_of_birth')?.column ?? null;
+  const transDateColumn = headerClassifications.find(h => h.role === 'transaction_date')?.column ?? null;
 
   // Clone data for mutation
   const result: DataRow[] = data.map(row => ({ ...row }));
@@ -182,17 +188,61 @@ export function applyContextualTransformations(data: DataRow[]): ContextualResul
     f: 'Female', female: 'Female', F: 'Female', FEMALE: 'Female',
   };
 
+  // ── Phase 1: Ensure age column is integer, collect values for median ──
+  const ageValues: number[] = [];
+  if (ageColumn) {
+    for (const row of result) {
+      const val = row[ageColumn];
+      if (val !== null && val !== undefined && String(val).trim() !== '') {
+        const num = Number(val);
+        if (!isNaN(num) && isFinite(num)) {
+          row[ageColumn] = Math.round(num); // Force integer
+          ageValues.push(Math.round(num));
+        }
+      }
+    }
+  }
+
+  // Compute median age for imputation
+  const medianAge = ageValues.length > 0
+    ? (() => {
+        const sorted = [...ageValues].sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+      })()
+    : null;
+
+  // ── Phase 2: Row-level transformations ──
   for (const row of result) {
     for (const col of columns) {
       const role = roleMap.get(col) ?? 'unknown';
       const inferred = typeMap.get(col) ?? 'text';
       const val = row[col];
-      const isEmpty = val === null || val === undefined || (typeof val === 'string' && val.trim() === '');
+      const valIsEmpty = val === null || val === undefined || (typeof val === 'string' && val.trim() === '');
 
-      // ── Missing value normalization ──
-      if (isEmpty) {
+      // ── Age column: flag-and-impute strategy ──
+      if (role === 'age') {
+        if (valIsEmpty || isNaN(Number(val))) {
+          if (medianAge !== null) {
+            row[col] = medianAge;
+            row['is_age_imputed'] = true;
+            ageImputedCount++;
+          } else {
+            row[col] = null;
+            row['is_age_imputed'] = true;
+          }
+        } else {
+          row[col] = Math.round(Number(val)); // Enforce integer
+          row['is_age_imputed'] = false;
+        }
+        missingValuesNormalized += valIsEmpty ? 1 : 0;
+        continue;
+      }
+
+      // ── Missing value normalization (non-age) ──
+      if (valIsEmpty) {
         if (inferred === 'measure' || role === 'revenue') {
-          row[col] = null; // null for numbers
+          row[col] = null;
         } else {
           row[col] = 'Unknown';
         }
@@ -243,20 +293,46 @@ export function applyContextualTransformations(data: DataRow[]): ContextualResul
       }
     }
 
-    // ── Feature Engineering: age_group ──
-    if (ageColumn && row[ageColumn] !== null && row[ageColumn] !== 'Unknown') {
-      const age = Number(row[ageColumn]);
-      if (!isNaN(age)) {
-        if (age < 18) row['age_group'] = 'Under 18';
-        else if (age <= 25) row['age_group'] = '18-25';
-        else if (age <= 35) row['age_group'] = '26-35';
-        else if (age <= 45) row['age_group'] = '36-45';
-        else if (age <= 60) row['age_group'] = '46-60';
-        else row['age_group'] = '60+';
-        ageGroupCreated = true;
+    // ── Feature Engineering: Calculated_Age from DOB + Transaction Date ──
+    if (dobColumn && transDateColumn) {
+      const dobVal = row[dobColumn];
+      const transVal = row[transDateColumn];
+      if (dobVal && transVal && String(dobVal).trim() !== '' && String(transVal).trim() !== '') {
+        const dobDate = new Date(String(dobVal));
+        const transDate = new Date(String(transVal));
+        if (!isNaN(dobDate.getTime()) && !isNaN(transDate.getTime())) {
+          // Precise age calculation accounting for leap years
+          let age = transDate.getFullYear() - dobDate.getFullYear();
+          const monthDiff = transDate.getMonth() - dobDate.getMonth();
+          if (monthDiff < 0 || (monthDiff === 0 && transDate.getDate() < dobDate.getDate())) {
+            age--;
+          }
+          row['calculated_age'] = Math.max(0, age);
+          calculatedAgeCreated = true;
+        } else {
+          row['calculated_age'] = null;
+        }
       } else {
-        row['age_group'] = 'Unknown';
+        row['calculated_age'] = null;
       }
+    }
+
+    // ── Feature Engineering: age_group ──
+    // Use calculated_age if available, otherwise use age column
+    const ageForGroup = row['calculated_age'] !== undefined && row['calculated_age'] !== null
+      ? Number(row['calculated_age'])
+      : (ageColumn && row[ageColumn] !== null && row[ageColumn] !== 'Unknown' ? Number(row[ageColumn]) : NaN);
+
+    if (!isNaN(ageForGroup)) {
+      if (ageForGroup < 18) row['age_group'] = 'Under 18';
+      else if (ageForGroup <= 25) row['age_group'] = '18-25';
+      else if (ageForGroup <= 35) row['age_group'] = '26-35';
+      else if (ageForGroup <= 45) row['age_group'] = '36-45';
+      else if (ageForGroup <= 60) row['age_group'] = '46-60';
+      else row['age_group'] = '60+';
+      ageGroupCreated = true;
+    } else {
+      row['age_group'] = 'Unknown';
     }
   }
 
@@ -277,6 +353,8 @@ export function applyContextualTransformations(data: DataRow[]): ContextualResul
       ageGroupCreated,
       booleansNormalized,
       genderNormalized,
+      calculatedAgeCreated,
+      ageImputedCount,
     },
   };
 }
