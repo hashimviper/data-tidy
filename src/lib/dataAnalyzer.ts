@@ -194,8 +194,13 @@ export function classifyColumn(
   return 'text';
 }
 
+// Age column patterns — these must NEVER be classified as date
+const AGE_COLUMN_PATTERNS = ['age', 'years_old', 'age_at', 'customer_age', 'employee_age', 'user_age'];
+const DATE_OF_BIRTH_PATTERNS = ['date_of_birth', 'dob', 'birth_date', 'birthdate', 'born'];
+
 // Detect column data type with improved accuracy
-export function detectColumnType(values: unknown[]): 'numeric' | 'categorical' | 'date' | 'boolean' | 'text' {
+// columnName is optional but prevents misclassification (e.g., age as date)
+export function detectColumnType(values: unknown[], columnName?: string): 'numeric' | 'categorical' | 'date' | 'boolean' | 'text' {
   const nonNullValues = values.filter(v => v !== null && v !== undefined && v !== '');
   if (nonNullValues.length === 0) return 'text';
   
@@ -208,14 +213,30 @@ export function detectColumnType(values: unknown[]): 'numeric' | 'categorical' |
     return [...BOOLEAN_VALUES.true, ...BOOLEAN_VALUES.false].includes(str);
   });
   if (booleanMatch && sample.length >= 2) return 'boolean';
-  
-  // Check for date - be more thorough
-  let dateCount = 0;
-  for (const v of sample) {
-    const { date } = parseMultiFormatDate(v);
-    if (date) dateCount++;
+
+  // ── Age column guard: force numeric, never date ──
+  const lowerCol = (columnName || '').toLowerCase().replace(/[^a-z0-9_]/g, '_');
+  const isAgeColumn = AGE_COLUMN_PATTERNS.some(p => lowerCol === p || lowerCol.endsWith('_' + p) || lowerCol.startsWith(p + '_'));
+  const isDobColumn = DATE_OF_BIRTH_PATTERNS.some(p => lowerCol.includes(p));
+
+  if (isAgeColumn && !isDobColumn) {
+    const numericCount = sample.filter(v => {
+      const str = String(v).trim();
+      if (str === '') return false;
+      return !isNaN(Number(str.replace(/,/g, '')));
+    }).length;
+    if (numericCount / sample.length >= 0.5) return 'numeric';
   }
-  if (dateCount / sample.length >= 0.7) return 'date';
+  
+  // Check for date — skip if column is age-related
+  if (!isAgeColumn) {
+    let dateCount = 0;
+    for (const v of sample) {
+      const { date } = parseMultiFormatDate(v);
+      if (date) dateCount++;
+    }
+    if (dateCount / sample.length >= 0.7) return 'date';
+  }
   
   // Check for numeric
   const numericCount = sample.filter(v => {
