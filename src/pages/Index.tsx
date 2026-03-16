@@ -50,7 +50,8 @@ const Index = () => {
   const [qualitySummary, setQualitySummary] = useState<DataQualitySummary | null>(null);
   const [useAiCleaning, setUseAiCleaning] = useState(false);
   const [aiStatusMessage, setAiStatusMessage] = useState<string | undefined>(undefined);
-  const [groqResult, setGroqResult] = useState<GroqCleaningResult | null>(null);
+  const [rejectedRows, setRejectedRows] = useState<RejectedRow[]>([]);
+  const [processorLog, setProcessorLog] = useState<ReturnType<typeof Object> | null>(null);
 
   const readExcelWorkbook = (file: File): Promise<ExcelWorkbook> => {
     return new Promise((resolve, reject) => {
