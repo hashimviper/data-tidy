@@ -6,7 +6,7 @@ type DataRow = Record<string, unknown>;
 
 // ─── 1. Fuzzy Header Recognition Dictionary ─────────────────────────────────
 
-export type SemanticRole = 'transaction_date' | 'revenue' | 'identity' | 'category' | 'boolean' | 'age' | 'gender' | 'pii' | 'unknown';
+export type SemanticRole = 'transaction_date' | 'revenue' | 'identity' | 'category' | 'boolean' | 'age' | 'gender' | 'pii' | 'date_of_birth' | 'unknown';
 
 // Date-of-birth patterns (should NOT be classified as transaction_date)
 const DOB_PATTERNS = ['date_of_birth', 'dob', 'birth_date', 'birthdate', 'born'];
