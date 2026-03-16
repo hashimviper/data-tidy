@@ -73,7 +73,9 @@ export class DataProcessor {
         mergedReport.missingValuesNormalized += report.missingValuesNormalized;
         mergedReport.booleansNormalized += report.booleansNormalized;
         mergedReport.genderNormalized += report.genderNormalized;
+        mergedReport.ageImputedCount += report.ageImputedCount;
         if (report.ageGroupCreated) mergedReport.ageGroupCreated = true;
+        if (report.calculatedAgeCreated) mergedReport.calculatedAgeCreated = true;
         report.piiColumnsMasked.forEach((col) => {
           if (!mergedReport!.piiColumnsMasked.includes(col)) {
             mergedReport!.piiColumnsMasked.push(col);
