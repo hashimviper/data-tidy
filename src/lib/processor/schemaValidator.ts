@@ -95,7 +95,16 @@ export function inferColumnDefs(data: Record<string, unknown>[]): ColumnDef[] {
   const sample = data.slice(0, 20);
   const columns = Object.keys(data[0]);
 
+  // Age column patterns — must be forced to 'number', never 'date'
+  const AGE_PATTERNS = ['age', 'years_old', 'age_at', 'customer_age', 'employee_age', 'user_age', 'calculated_age'];
+
   return columns.map((name) => {
+    const lowerName = name.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+    const isAge = AGE_PATTERNS.some(p => lowerName === p || lowerName.endsWith('_' + p) || lowerName.startsWith(p + '_'));
+
+    // Force age columns to number type
+    if (isAge) return { name, type: 'number' as const };
+
     const values = sample
       .map((r) => r[name])
       .filter((v) => v !== null && v !== undefined && String(v).trim() !== '');
