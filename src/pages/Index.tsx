@@ -249,7 +249,8 @@ const Index = () => {
     setQualitySummary(null);
     setUseAiCleaning(false);
     setAiStatusMessage(undefined);
-    setGroqResult(null);
+    setRejectedRows([]);
+    setProcessorLog(null);
   };
 
   const handleNavigate = (step: number) => {
