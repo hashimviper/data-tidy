@@ -15,11 +15,14 @@ import { DashboardSidebar } from '@/components/DashboardSidebar';
 import { DashboardHeader } from '@/components/DashboardHeader';
 import { QuickStats } from '@/components/QuickStats';
 import { InteractiveUpload } from '@/components/InteractiveUpload';
+import { AIInsightsPanel } from '@/components/AIInsightsPanel';
+import { AIRecommendationsPanel } from '@/components/AIRecommendationsPanel';
 import { profileColumn } from '@/lib/dataAnalyzer';
 import { autoTransform, SchemaValidationResult, DataQualitySummary } from '@/lib/schemaEngine';
 import { DataProcessor, type ProcessorResult, type RejectedRow } from '@/lib/processor';
+import { analyzeDataset, applySelectedFixes, type DatasetAnalysis, type SuggestedFix } from '@/lib/aiAnalyzer';
 import { CleaningConfig, DEFAULT_CLEANING_CONFIG, EnhancedCleaningResult, ColumnProfile } from '@/lib/dataTypes';
-import { Sparkles, Download, BarChart3, Table, FileText, Settings2, Layers, Brain } from 'lucide-react';
+import { Sparkles, Download, BarChart3, Table, FileText, Settings2, Layers, Brain, Loader2 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -53,6 +56,13 @@ const Index = () => {
   const [rejectedRows, setRejectedRows] = useState<RejectedRow[]>([]);
   const [processorLog, setProcessorLog] = useState<ReturnType<typeof Object> | null>(null);
 
+  // AI Analysis state
+  const [aiAnalysis, setAiAnalysis] = useState<DatasetAnalysis | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisStatus, setAnalysisStatus] = useState('');
+  const [suggestedFixes, setSuggestedFixes] = useState<SuggestedFix[]>([]);
+  const [isApplyingFixes, setIsApplyingFixes] = useState(false);
+
   const readExcelWorkbook = (file: File): Promise<ExcelWorkbook> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -81,6 +91,92 @@ const Index = () => {
     setColumnProfiles(profiles);
     
     setCurrentStep(2);
+
+    // Auto-trigger AI analysis
+    runAIAnalysis(data);
+  };
+
+  const runAIAnalysis = async (data: Record<string, unknown>[]) => {
+    setIsAnalyzing(true);
+    setAiAnalysis(null);
+    setSuggestedFixes([]);
+    try {
+      const result = await analyzeDataset(data, (info) => {
+        setAnalysisStatus(info.message);
+      });
+      setAiAnalysis(result);
+      // Flatten all suggested fixes
+      const allFixes = result.columns.flatMap(c => c.suggested_fixes);
+      setSuggestedFixes(allFixes);
+    } catch (err) {
+      console.error('AI analysis failed:', err);
+      toast({ title: 'AI Analysis', description: 'Analysis completed with local engine only.', variant: 'default' });
+    }
+    setIsAnalyzing(false);
+    setAnalysisStatus('');
+  };
+
+  const handleToggleFix = (fixId: string) => {
+    setSuggestedFixes(prev => prev.map(f => f.id === fixId ? { ...f, enabled: !f.enabled } : f));
+  };
+
+  const handleToggleAllFixes = (enabled: boolean) => {
+    setSuggestedFixes(prev => prev.map(f => ({ ...f, enabled })));
+  };
+
+  const handleOneClickClean = async () => {
+    if (!rawData) return;
+
+    setIsApplyingFixes(true);
+
+    try {
+      // Step 1: Apply the selected AI fixes first
+      const preCleanedData = applySelectedFixes(rawData, suggestedFixes);
+
+      // Step 2: Run through the full processor pipeline
+      const groqKey = import.meta.env.VITE_GROQ_API_KEY;
+      const googleKey = import.meta.env.VITE_GOOGLE_API_KEY;
+      const llmProvider = groqKey ? 'groq' as const : 'google' as const;
+      const llmApiKey = groqKey || googleKey;
+
+      const processor = new DataProcessor({
+        cleaningConfig: config,
+        chunkSize: 1000,
+        enableLLM: useAiCleaning && !!llmApiKey,
+        llmProvider,
+        llmApiKey: llmApiKey || undefined,
+        onLLMProgress: (info) => {
+          setAiStatusMessage(info.message);
+        },
+      });
+
+      const processorResult = await processor.process(preCleanedData);
+
+      const { validationResult, transformationResult } = autoTransform(processorResult.cleanedData);
+      setSchemaValidation(validationResult);
+      if (transformationResult) {
+        setQualitySummary(transformationResult.qualitySummary);
+      }
+
+      setResult(processorResult.enhancedResult);
+      setRejectedRows(processorResult.rejectedRows);
+      setProcessorLog(processorResult.log);
+      setCurrentStep(4);
+
+      const enabledCount = suggestedFixes.filter(f => f.enabled).length;
+      const ctx = processorResult.contextualReport;
+      toast({
+        title: '✨ AI Cleaning Complete',
+        description: `Applied ${enabledCount} AI fix(es). Detected ${ctx.measuresDetected} Measure(s), ${ctx.dimensionsDetected} Dimension(s). ${processorResult.rejectedRows.length > 0 ? `${processorResult.rejectedRows.length} rows rejected.` : ''} (${processorResult.log.elapsedMs.toFixed(0)}ms)`,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error processing data.';
+      setError(msg);
+      toast({ title: 'Cleaning failed', description: msg, variant: 'destructive' });
+    }
+
+    setIsApplyingFixes(false);
+    setAiStatusMessage(undefined);
   };
 
   const startCleaning = () => {
@@ -97,7 +193,6 @@ const Index = () => {
     }
 
     try {
-      // Determine LLM API key: prefer Groq, fallback to Google
       const groqKey = import.meta.env.VITE_GROQ_API_KEY;
       const googleKey = import.meta.env.VITE_GOOGLE_API_KEY;
       const llmProvider = groqKey ? 'groq' as const : 'google' as const;
@@ -119,7 +214,6 @@ const Index = () => {
 
       const processorResult = await processor.process(rawData);
 
-      // Apply schema engine on top
       const { validationResult, transformationResult } = autoTransform(processorResult.cleanedData);
       setSchemaValidation(validationResult);
       if (transformationResult) {
@@ -131,7 +225,6 @@ const Index = () => {
       setProcessorLog(processorResult.log);
       setCurrentStep(4);
 
-      // Show cleaning report toast
       const ctx = processorResult.contextualReport;
       const piiNote = ctx.piiColumnsMasked.length > 0 ? ` Masked ${ctx.piiColumnsMasked.length} PII column(s).` : '';
       const ageNote = ctx.ageGroupCreated ? ' Generated age_group column.' : '';
@@ -251,6 +344,10 @@ const Index = () => {
     setAiStatusMessage(undefined);
     setRejectedRows([]);
     setProcessorLog(null);
+    setAiAnalysis(null);
+    setIsAnalyzing(false);
+    setAnalysisStatus('');
+    setSuggestedFixes([]);
   };
 
   const handleNavigate = (step: number) => {
@@ -309,25 +406,55 @@ const Index = () => {
             </div>
           )}
 
-          {/* Step 2: Configure */}
+          {/* Step 2: Configure + AI Insights */}
           {currentStep === 2 && rawData && (
-            <div className="max-w-4xl mx-auto space-y-6 animate-fade-up">
-              <div className="glass-card rounded-2xl p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h3 className="text-xl font-bold text-foreground">Configure Cleaning Options</h3>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Customize how your data will be processed
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-muted-foreground">
-                      {rawData.length.toLocaleString()} rows • {columnProfiles.length} columns
-                    </span>
+            <div className="max-w-5xl mx-auto space-y-6 animate-fade-up">
+              {/* AI Analysis Loading */}
+              {isAnalyzing && (
+                <div className="glass-card rounded-2xl p-6 border-primary/30">
+                  <div className="flex items-center gap-3">
+                    <Loader2 className="w-5 h-5 text-primary animate-spin" />
+                    <div>
+                      <h3 className="text-sm font-semibold text-foreground">AI is analyzing your dataset...</h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">{analysisStatus}</p>
+                    </div>
                   </div>
                 </div>
+              )}
 
-                <div className="space-y-4">
+              {/* AI Insights Panel */}
+              {aiAnalysis && <AIInsightsPanel analysis={aiAnalysis} />}
+
+              {/* Two-column layout: Recommendations + Config */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* AI Recommendations */}
+                {suggestedFixes.length > 0 && (
+                  <AIRecommendationsPanel
+                    fixes={suggestedFixes}
+                    onToggleFix={handleToggleFix}
+                    onApplyAll={handleOneClickClean}
+                    onToggleAll={handleToggleAllFixes}
+                    isApplying={isApplyingFixes}
+                  />
+                )}
+
+                {/* Manual Config */}
+                <div className="glass-card rounded-2xl p-6 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
+                        <Settings2 className="w-5 h-5 text-primary" />
+                        Advanced Options
+                      </h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Fine-tune cleaning behavior
+                      </p>
+                    </div>
+                    <span className="text-sm text-muted-foreground">
+                      {rawData.length.toLocaleString()} rows • {columnProfiles.length} cols
+                    </span>
+                  </div>
+
                   <CleaningConfigPanel config={config} onChange={setConfig} />
                   
                   {columnProfiles.length > 0 && (
@@ -337,36 +464,37 @@ const Index = () => {
                       onChange={setColumnOverrides}
                     />
                   )}
-                </div>
 
-                {/* AI Cleaning Toggle */}
-                <div className="mt-4 p-4 rounded-xl border border-border bg-muted/30">
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={useAiCleaning}
-                      onChange={(e) => setUseAiCleaning(e.target.checked)}
-                      className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
-                    />
-                    <Brain className="w-5 h-5 text-primary" />
-                    <div>
-                      <span className="font-medium text-foreground text-sm">Enable AI Cleaning (Groq + Llama 3)</span>
-                      <p className="text-xs text-muted-foreground">
-                        Uses Llama 3.3-70b to intelligently normalize headers, enforce types, and engineer features like age_group.
-                      </p>
-                    </div>
-                  </label>
-                </div>
+                  {/* AI Cleaning Toggle */}
+                  <div className="p-4 rounded-xl border border-border bg-muted/30">
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={useAiCleaning}
+                        onChange={(e) => setUseAiCleaning(e.target.checked)}
+                        className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
+                      />
+                      <Brain className="w-5 h-5 text-primary" />
+                      <div>
+                        <span className="font-medium text-foreground text-sm">Enable Deep AI Cleaning</span>
+                        <p className="text-xs text-muted-foreground">
+                          Send messy rows to LLM for semantic normalization (slower, uses API credits)
+                        </p>
+                      </div>
+                    </label>
+                  </div>
 
-                <div className="mt-6 pt-6 border-t border-border flex justify-end">
-                  <Button 
-                    onClick={startCleaning}
-                    size="lg"
-                    className="gap-2 px-8 shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all"
-                  >
-                    {useAiCleaning ? <Brain className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
-                    {useAiCleaning ? 'Start AI Cleaning' : 'Start Cleaning'}
-                  </Button>
+                  <div className="pt-4 border-t border-border flex justify-end">
+                    <Button 
+                      onClick={startCleaning}
+                      size="lg"
+                      variant="outline"
+                      className="gap-2"
+                    >
+                      {useAiCleaning ? <Brain className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
+                      Manual Pipeline
+                    </Button>
+                  </div>
                 </div>
               </div>
 
