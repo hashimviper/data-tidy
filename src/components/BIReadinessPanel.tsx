@@ -174,7 +174,6 @@ function ReconciliationSection({ report }: { report: BIReadinessReport }) {
   const recon = report.reconciliation;
   if (!recon) return null;
 
-  const [expanded, setExpanded] = useState(false);
   const significantShifts = recon.distributionShifts.filter(d => d.isSignificant);
 
   return (
