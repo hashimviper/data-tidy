@@ -170,6 +170,7 @@ function GhostDataSection({ ghost }: { ghost: GhostDataResult[] }) {
 }
 
 function ReconciliationSection({ report }: { report: BIReadinessReport }) {
+  const [expanded, setExpanded] = useState(false);
   const recon = report.reconciliation;
   if (!recon) return null;
 
