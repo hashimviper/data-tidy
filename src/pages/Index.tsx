@@ -557,6 +557,12 @@ const Index = () => {
                     <Table className="w-4 h-4" />
                     Data Preview
                   </TabsTrigger>
+                  {biReport && (
+                    <TabsTrigger value="bi-readiness" className="gap-2">
+                      <ShieldCheck className="w-4 h-4" />
+                      BI-Readiness
+                    </TabsTrigger>
+                  )}
                 </TabsList>
 
                 <TabsContent value="summary" className="mt-6">
