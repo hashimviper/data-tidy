@@ -164,6 +164,11 @@ const Index = () => {
       setResult(processorResult.enhancedResult);
       setRejectedRows(processorResult.rejectedRows);
       setProcessorLog(processorResult.log);
+
+      // BI-Readiness Assessment
+      const biAssessment = assessBIReadiness(processorResult.cleanedData, rawData);
+      setBiReport(biAssessment);
+
       setCurrentStep(4);
 
       const enabledCount = suggestedFixes.filter(f => f.enabled).length;
