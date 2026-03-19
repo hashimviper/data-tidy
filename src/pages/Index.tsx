@@ -17,12 +17,14 @@ import { QuickStats } from '@/components/QuickStats';
 import { InteractiveUpload } from '@/components/InteractiveUpload';
 import { AIInsightsPanel } from '@/components/AIInsightsPanel';
 import { AIRecommendationsPanel } from '@/components/AIRecommendationsPanel';
+import { BIReadinessPanel } from '@/components/BIReadinessPanel';
 import { profileColumn } from '@/lib/dataAnalyzer';
 import { autoTransform, SchemaValidationResult, DataQualitySummary } from '@/lib/schemaEngine';
 import { DataProcessor, type ProcessorResult, type RejectedRow } from '@/lib/processor';
 import { analyzeDataset, applySelectedFixes, type DatasetAnalysis, type SuggestedFix } from '@/lib/aiAnalyzer';
+import { assessBIReadiness, type BIReadinessReport } from '@/lib/biReadiness';
 import { CleaningConfig, DEFAULT_CLEANING_CONFIG, EnhancedCleaningResult, ColumnProfile } from '@/lib/dataTypes';
-import { Sparkles, Download, BarChart3, Table, FileText, Settings2, Layers, Brain, Loader2 } from 'lucide-react';
+import { Sparkles, Download, BarChart3, Table, FileText, Settings2, Layers, Brain, Loader2, ShieldCheck } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -62,6 +64,7 @@ const Index = () => {
   const [analysisStatus, setAnalysisStatus] = useState('');
   const [suggestedFixes, setSuggestedFixes] = useState<SuggestedFix[]>([]);
   const [isApplyingFixes, setIsApplyingFixes] = useState(false);
+  const [biReport, setBiReport] = useState<BIReadinessReport | null>(null);
 
   const readExcelWorkbook = (file: File): Promise<ExcelWorkbook> => {
     return new Promise((resolve, reject) => {
@@ -161,6 +164,11 @@ const Index = () => {
       setResult(processorResult.enhancedResult);
       setRejectedRows(processorResult.rejectedRows);
       setProcessorLog(processorResult.log);
+
+      // BI-Readiness Assessment
+      const biAssessment = assessBIReadiness(processorResult.cleanedData, rawData);
+      setBiReport(biAssessment);
+
       setCurrentStep(4);
 
       const enabledCount = suggestedFixes.filter(f => f.enabled).length;
@@ -223,6 +231,11 @@ const Index = () => {
       setResult(processorResult.enhancedResult);
       setRejectedRows(processorResult.rejectedRows);
       setProcessorLog(processorResult.log);
+
+      // BI-Readiness Assessment
+      const biAssessment = assessBIReadiness(processorResult.cleanedData, rawData);
+      setBiReport(biAssessment);
+
       setCurrentStep(4);
 
       const ctx = processorResult.contextualReport;
@@ -348,6 +361,7 @@ const Index = () => {
     setIsAnalyzing(false);
     setAnalysisStatus('');
     setSuggestedFixes([]);
+    setBiReport(null);
   };
 
   const handleNavigate = (step: number) => {
@@ -543,6 +557,12 @@ const Index = () => {
                     <Table className="w-4 h-4" />
                     Data Preview
                   </TabsTrigger>
+                  {biReport && (
+                    <TabsTrigger value="bi-readiness" className="gap-2">
+                      <ShieldCheck className="w-4 h-4" />
+                      BI-Readiness
+                    </TabsTrigger>
+                  )}
                 </TabsList>
 
                 <TabsContent value="summary" className="mt-6">
@@ -581,6 +601,12 @@ const Index = () => {
                     <DataTable data={result.data} maxRows={100} />
                   </div>
                 </TabsContent>
+
+                {biReport && (
+                  <TabsContent value="bi-readiness" className="mt-6">
+                    <BIReadinessPanel report={biReport} />
+                  </TabsContent>
+                )}
               </Tabs>
 
               {/* Export CTA */}
