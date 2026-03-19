@@ -361,6 +361,7 @@ const Index = () => {
     setIsAnalyzing(false);
     setAnalysisStatus('');
     setSuggestedFixes([]);
+    setBiReport(null);
   };
 
   const handleNavigate = (step: number) => {
