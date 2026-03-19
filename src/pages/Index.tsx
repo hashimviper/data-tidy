@@ -64,6 +64,7 @@ const Index = () => {
   const [analysisStatus, setAnalysisStatus] = useState('');
   const [suggestedFixes, setSuggestedFixes] = useState<SuggestedFix[]>([]);
   const [isApplyingFixes, setIsApplyingFixes] = useState(false);
+  const [biReport, setBiReport] = useState<BIReadinessReport | null>(null);
 
   const readExcelWorkbook = (file: File): Promise<ExcelWorkbook> => {
     return new Promise((resolve, reject) => {
