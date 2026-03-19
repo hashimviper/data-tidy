@@ -601,6 +601,12 @@ const Index = () => {
                     <DataTable data={result.data} maxRows={100} />
                   </div>
                 </TabsContent>
+
+                {biReport && (
+                  <TabsContent value="bi-readiness" className="mt-6">
+                    <BIReadinessPanel report={biReport} />
+                  </TabsContent>
+                )}
               </Tabs>
 
               {/* Export CTA */}
