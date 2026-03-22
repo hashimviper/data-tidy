@@ -12,7 +12,7 @@ export type SemanticRole = 'transaction_date' | 'revenue' | 'identity' | 'catego
 const DOB_PATTERNS = ['date_of_birth', 'dob', 'birth_date', 'birthdate', 'born'];
 
 const HEADER_DICTIONARY: Record<SemanticRole, string[]> = {
-  transaction_date: ['date', 'time', 'timestamp', 'created_at', 'trans_', 'order_date', 'purchase_date', 'datetime', 'created', 'updated_at'],
+  transaction_date: ['date', 'time', 'timestamp', 'created_at', 'trans_', 'order_date', 'purchase_date', 'datetime', 'created', 'updated_at', 'joining', 'join_date', 'hire_date', 'start_date', 'end_date'],
   revenue: ['amount', 'sales', 'price', 'revenue', 'cost', 'total', 'spend', 'income', 'profit', 'fee', 'charge', 'payment', 'value'],
   identity: ['id', 'uuid', 'guid', 'key', 'customer', 'user', 'employee', 'client', 'account', 'member'],
   category: ['type', 'category', 'group', 'class', 'segment', 'department', 'region', 'channel', 'product_category', 'tier'],
