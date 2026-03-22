@@ -217,71 +217,8 @@ const Index = () => {
 
   const startCleaning = () => {
     if (rawData) {
-      setCurrentStep(3);
-      setIsProcessing(true);
+      runCleaningPipeline(useAiCleaning ? 'ai-deep' : 'local');
     }
-  };
-
-  const handleCleaningComplete = async () => {
-    if (!rawData) {
-      setIsProcessing(false);
-      return;
-    }
-
-    try {
-      const groqKey = import.meta.env.VITE_GROQ_API_KEY;
-      const googleKey = import.meta.env.VITE_GOOGLE_API_KEY;
-      const llmProvider = groqKey ? 'groq' as const : 'google' as const;
-      const llmApiKey = groqKey || googleKey;
-
-      const processor = new DataProcessor({
-        cleaningConfig: config,
-        chunkSize: 1000,
-        enableLLM: useAiCleaning && !!llmApiKey,
-        llmProvider,
-        llmApiKey: llmApiKey || undefined,
-        onLLMProgress: (info) => {
-          setAiStatusMessage(info.message);
-          if (info.phase === 'retrying' && info.message.includes('Rate limited')) {
-            toast({ title: 'API rate limit reached', description: 'Retrying...', variant: 'destructive' });
-          }
-        },
-      });
-
-      const processorResult = await processor.process(rawData);
-
-      const { validationResult, transformationResult } = autoTransform(processorResult.cleanedData);
-      setSchemaValidation(validationResult);
-      if (transformationResult) {
-        setQualitySummary(transformationResult.qualitySummary);
-      }
-
-      setResult(processorResult.enhancedResult);
-      setRejectedRows(processorResult.rejectedRows);
-      setProcessorLog(processorResult.log);
-
-      // BI-Readiness Assessment
-      const biAssessment = assessBIReadiness(processorResult.cleanedData, rawData);
-      setBiReport(biAssessment);
-
-      setCurrentStep(4);
-
-      const ctx = processorResult.contextualReport;
-      const piiNote = ctx.piiColumnsMasked.length > 0 ? ` Masked ${ctx.piiColumnsMasked.length} PII column(s).` : '';
-      const ageNote = ctx.ageGroupCreated ? ' Generated age_group column.' : '';
-      const rejectedNote = processorResult.rejectedRows.length > 0 ? ` ${processorResult.rejectedRows.length} rows rejected.` : '';
-      const timeNote = ` (${processorResult.log.elapsedMs.toFixed(0)}ms)`;
-
-      toast({
-        title: '✨ Cleaning Report',
-        description: `Detected ${ctx.measuresDetected} Measure(s) and ${ctx.dimensionsDetected} Dimension(s). Normalized ${ctx.missingValuesNormalized} missing values.${piiNote}${ageNote}${rejectedNote}${timeNote}`,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error processing data.';
-      setError(msg);
-    }
-    setIsProcessing(false);
-    setAiStatusMessage(undefined);
   };
 
   const processSheet = (workbook: XLSX.WorkBook, sheetName: string) => {
