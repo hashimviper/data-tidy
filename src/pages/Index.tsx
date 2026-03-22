@@ -491,7 +491,7 @@ const Index = () => {
           {/* Step 3: Processing */}
           {currentStep === 3 && (
             <div className="max-w-2xl mx-auto">
-              <CleaningProgress isProcessing={isProcessing} onComplete={handleCleaningComplete} aiStatusMessage={aiStatusMessage} />
+              <CleaningProgress isProcessing={isProcessing} aiStatusMessage={aiStatusMessage} />
             </div>
           )}
 
