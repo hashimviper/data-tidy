@@ -176,6 +176,42 @@ export function applyContextualTransformations(data: DataRow[]): ContextualResul
   // Clone data for mutation
   const result: DataRow[] = data.map(row => ({ ...row }));
 
+  // ── Phase 0: Ghost Data Sanitization ──
+  // Remove invisible characters (tabs, newlines, trailing/leading spaces) from ALL text values
+  // This prevents BI join failures in Power BI / Tableau
+  for (const row of result) {
+    for (const col of columns) {
+      const val = row[col];
+      if (typeof val === 'string') {
+        // Strip tabs, newlines, carriage returns, zero-width spaces, and trim
+        row[col] = val
+          .replace(/[\t\r\n\v\f\u200B\u200C\u200D\uFEFF]/g, '')
+          .trim();
+      }
+    }
+  }
+
+  // ── Phase 0b: Date Column Normalization ──
+  // Detect date-role columns and normalize all values to ISO YYYY-MM-DD
+  const dateColumns = headerClassifications
+    .filter(h => h.role === 'transaction_date' || h.role === 'date_of_birth')
+    .map(h => h.column);
+
+  for (const col of dateColumns) {
+    for (const row of result) {
+      const val = row[col];
+      if (val === null || val === undefined || String(val).trim() === '') continue;
+      const strVal = String(val).trim();
+
+      // Try multiple date formats
+      const parsed = robustDateParse(strVal);
+      if (parsed) {
+        row[col] = parsed; // ISO YYYY-MM-DD string
+      }
+      // If parsing fails, leave the value as-is (will be caught by schema validation)
+    }
+  }
+
   // Identify PII columns to mask
   const piiColumns = columns.filter(col =>
     roleMap.get(col) === 'pii' || typeMap.get(col) === 'pii_email'
