@@ -111,6 +111,55 @@ function maskEmail(email: string): string {
   return email[0] + '***' + email.slice(at);
 }
 
+// ─── 3b. Robust Date Parser ─────────────────────────────────────────────────
+
+/**
+ * Parses a date string in multiple formats and returns ISO YYYY-MM-DD.
+ * Handles: ISO, US (MM/DD/YYYY), EU (DD-MM-YYYY, DD/MM/YYYY), and common variants.
+ */
+function robustDateParse(val: string): string | null {
+  if (!val || val.trim() === '') return null;
+  const s = val.trim();
+
+  // ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+  }
+
+  // US format: MM/DD/YYYY or MM-DD-YYYY
+  const usMatch = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (usMatch) {
+    const [, m, d, y] = usMatch;
+    const month = parseInt(m, 10);
+    const day = parseInt(d, 10);
+    // Heuristic: if first number > 12, it's likely DD/MM/YYYY (EU)
+    if (month > 12 && day <= 12) {
+      const date = new Date(parseInt(y, 10), day - 1, month);
+      if (!isNaN(date.getTime())) return date.toISOString().split('T')[0];
+    } else {
+      const date = new Date(parseInt(y, 10), month - 1, day);
+      if (!isNaN(date.getTime())) return date.toISOString().split('T')[0];
+    }
+  }
+
+  // EU format: DD.MM.YYYY
+  const euDotMatch = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if (euDotMatch) {
+    const [, d, m, y] = euDotMatch;
+    const date = new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10));
+    if (!isNaN(date.getTime())) return date.toISOString().split('T')[0];
+  }
+
+  // Fallback: try native Date parser
+  const fallback = new Date(s);
+  if (!isNaN(fallback.getTime()) && s.length > 4) {
+    return fallback.toISOString().split('T')[0];
+  }
+
+  return null;
+}
+
 // ─── 4. Core Contextual Transformation ──────────────────────────────────────
 
 export interface ContextualResult {
