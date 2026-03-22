@@ -12,7 +12,7 @@ export type SemanticRole = 'transaction_date' | 'revenue' | 'identity' | 'catego
 const DOB_PATTERNS = ['date_of_birth', 'dob', 'birth_date', 'birthdate', 'born'];
 
 const HEADER_DICTIONARY: Record<SemanticRole, string[]> = {
-  transaction_date: ['date', 'time', 'timestamp', 'created_at', 'trans_', 'order_date', 'purchase_date', 'datetime', 'created', 'updated_at'],
+  transaction_date: ['date', 'time', 'timestamp', 'created_at', 'trans_', 'order_date', 'purchase_date', 'datetime', 'created', 'updated_at', 'joining', 'join_date', 'hire_date', 'start_date', 'end_date'],
   revenue: ['amount', 'sales', 'price', 'revenue', 'cost', 'total', 'spend', 'income', 'profit', 'fee', 'charge', 'payment', 'value'],
   identity: ['id', 'uuid', 'guid', 'key', 'customer', 'user', 'employee', 'client', 'account', 'member'],
   category: ['type', 'category', 'group', 'class', 'segment', 'department', 'region', 'channel', 'product_category', 'tier'],
@@ -111,6 +111,55 @@ function maskEmail(email: string): string {
   return email[0] + '***' + email.slice(at);
 }
 
+// ─── 3b. Robust Date Parser ─────────────────────────────────────────────────
+
+/**
+ * Parses a date string in multiple formats and returns ISO YYYY-MM-DD.
+ * Handles: ISO, US (MM/DD/YYYY), EU (DD-MM-YYYY, DD/MM/YYYY), and common variants.
+ */
+function robustDateParse(val: string): string | null {
+  if (!val || val.trim() === '') return null;
+  const s = val.trim();
+
+  // ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+  }
+
+  // US format: MM/DD/YYYY or MM-DD-YYYY
+  const usMatch = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (usMatch) {
+    const [, m, d, y] = usMatch;
+    const month = parseInt(m, 10);
+    const day = parseInt(d, 10);
+    // Heuristic: if first number > 12, it's likely DD/MM/YYYY (EU)
+    if (month > 12 && day <= 12) {
+      const date = new Date(parseInt(y, 10), day - 1, month);
+      if (!isNaN(date.getTime())) return date.toISOString().split('T')[0];
+    } else {
+      const date = new Date(parseInt(y, 10), month - 1, day);
+      if (!isNaN(date.getTime())) return date.toISOString().split('T')[0];
+    }
+  }
+
+  // EU format: DD.MM.YYYY
+  const euDotMatch = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if (euDotMatch) {
+    const [, d, m, y] = euDotMatch;
+    const date = new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10));
+    if (!isNaN(date.getTime())) return date.toISOString().split('T')[0];
+  }
+
+  // Fallback: try native Date parser
+  const fallback = new Date(s);
+  if (!isNaN(fallback.getTime()) && s.length > 4) {
+    return fallback.toISOString().split('T')[0];
+  }
+
+  return null;
+}
+
 // ─── 4. Core Contextual Transformation ──────────────────────────────────────
 
 export interface ContextualResult {
@@ -175,6 +224,42 @@ export function applyContextualTransformations(data: DataRow[]): ContextualResul
 
   // Clone data for mutation
   const result: DataRow[] = data.map(row => ({ ...row }));
+
+  // ── Phase 0: Ghost Data Sanitization ──
+  // Remove invisible characters (tabs, newlines, trailing/leading spaces) from ALL text values
+  // This prevents BI join failures in Power BI / Tableau
+  for (const row of result) {
+    for (const col of columns) {
+      const val = row[col];
+      if (typeof val === 'string') {
+        // Strip tabs, newlines, carriage returns, zero-width spaces, and trim
+        row[col] = val
+          .replace(/[\t\r\n\v\f\u200B\u200C\u200D\uFEFF]/g, '')
+          .trim();
+      }
+    }
+  }
+
+  // ── Phase 0b: Date Column Normalization ──
+  // Detect date-role columns and normalize all values to ISO YYYY-MM-DD
+  const dateColumns = headerClassifications
+    .filter(h => h.role === 'transaction_date' || h.role === 'date_of_birth')
+    .map(h => h.column);
+
+  for (const col of dateColumns) {
+    for (const row of result) {
+      const val = row[col];
+      if (val === null || val === undefined || String(val).trim() === '') continue;
+      const strVal = String(val).trim();
+
+      // Try multiple date formats
+      const parsed = robustDateParse(strVal);
+      if (parsed) {
+        row[col] = parsed; // ISO YYYY-MM-DD string
+      }
+      // If parsing fails, leave the value as-is (will be caught by schema validation)
+    }
+  }
 
   // Identify PII columns to mask
   const piiColumns = columns.filter(col =>
