@@ -127,14 +127,19 @@ const Index = () => {
     setSuggestedFixes(prev => prev.map(f => ({ ...f, enabled })));
   };
 
-  const handleOneClickClean = async () => {
+  const runCleaningPipeline = async (mode: 'local' | 'ai-smart' | 'ai-deep') => {
     if (!rawData) return;
 
     setIsApplyingFixes(true);
+    setIsProcessing(true);
+    setCurrentStep(3);
 
     try {
-      // Step 1: Apply the selected AI fixes first
-      const preCleanedData = applySelectedFixes(rawData, suggestedFixes);
+      // Step 1: Apply AI-suggested fixes if in smart/deep mode
+      let dataToProcess = rawData;
+      if (mode !== 'local' && suggestedFixes.length > 0) {
+        dataToProcess = applySelectedFixes(rawData, suggestedFixes);
+      }
 
       // Step 2: Run through the full processor pipeline
       const groqKey = import.meta.env.VITE_GROQ_API_KEY;
@@ -142,10 +147,12 @@ const Index = () => {
       const llmProvider = groqKey ? 'groq' as const : 'google' as const;
       const llmApiKey = groqKey || googleKey;
 
+      const enableLLM = mode === 'ai-deep' && !!llmApiKey;
+
       const processor = new DataProcessor({
         cleaningConfig: config,
         chunkSize: 1000,
-        enableLLM: useAiCleaning && !!llmApiKey,
+        enableLLM,
         llmProvider,
         llmApiKey: llmApiKey || undefined,
         onLLMProgress: (info) => {
@@ -153,39 +160,60 @@ const Index = () => {
         },
       });
 
-      const processorResult = await processor.process(preCleanedData);
+      const processorResult = await processor.process(dataToProcess);
 
-      const { validationResult, transformationResult } = autoTransform(processorResult.cleanedData);
+      // Use cleanedData from processor (which falls back to input if enhancedResult.data is empty)
+      const finalCleanedData = processorResult.cleanedData.length > 0
+        ? processorResult.cleanedData
+        : dataToProcess;
+
+      const { validationResult, transformationResult } = autoTransform(finalCleanedData);
       setSchemaValidation(validationResult);
       if (transformationResult) {
         setQualitySummary(transformationResult.qualitySummary);
       }
 
-      setResult(processorResult.enhancedResult);
+      // Ensure result.data is populated
+      const enhancedResult = {
+        ...processorResult.enhancedResult,
+        data: processorResult.enhancedResult.data?.length > 0
+          ? processorResult.enhancedResult.data
+          : finalCleanedData,
+      };
+
+      setResult(enhancedResult);
       setRejectedRows(processorResult.rejectedRows);
       setProcessorLog(processorResult.log);
 
-      // BI-Readiness Assessment
-      const biAssessment = assessBIReadiness(processorResult.cleanedData, rawData);
+      // BI-Readiness Assessment — use the guaranteed non-empty data
+      const biAssessment = assessBIReadiness(finalCleanedData, rawData);
       setBiReport(biAssessment);
 
       setCurrentStep(4);
 
-      const enabledCount = suggestedFixes.filter(f => f.enabled).length;
       const ctx = processorResult.contextualReport;
+      const modeLabel = mode === 'local' ? 'Local' : mode === 'ai-smart' ? 'Smart AI' : 'Deep AI';
+      const fixCount = mode !== 'local' ? suggestedFixes.filter(f => f.enabled).length : 0;
+      const fixNote = fixCount > 0 ? ` Applied ${fixCount} AI fix(es).` : '';
+      const rejectedNote = processorResult.rejectedRows.length > 0 ? ` ${processorResult.rejectedRows.length} rows rejected.` : '';
+
       toast({
-        title: '✨ AI Cleaning Complete',
-        description: `Applied ${enabledCount} AI fix(es). Detected ${ctx.measuresDetected} Measure(s), ${ctx.dimensionsDetected} Dimension(s). ${processorResult.rejectedRows.length > 0 ? `${processorResult.rejectedRows.length} rows rejected.` : ''} (${processorResult.log.elapsedMs.toFixed(0)}ms)`,
+        title: `✨ ${modeLabel} Cleaning Complete`,
+        description: `Detected ${ctx.measuresDetected} Measure(s), ${ctx.dimensionsDetected} Dimension(s). Normalized ${ctx.missingValuesNormalized} missing values.${fixNote}${rejectedNote} (${processorResult.log.elapsedMs.toFixed(0)}ms)`,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Error processing data.';
       setError(msg);
+      setCurrentStep(2);
       toast({ title: 'Cleaning failed', description: msg, variant: 'destructive' });
     }
 
     setIsApplyingFixes(false);
+    setIsProcessing(false);
     setAiStatusMessage(undefined);
   };
+
+  const handleOneClickClean = () => runCleaningPipeline('ai-smart');
 
   const startCleaning = () => {
     if (rawData) {
