@@ -444,7 +444,7 @@ const Index = () => {
                     />
                   )}
 
-                  {/* AI Cleaning Toggle */}
+                   {/* AI Cleaning Toggle */}
                   <div className="p-4 rounded-xl border border-border bg-muted/30">
                     <label className="flex items-center gap-3 cursor-pointer">
                       <input
@@ -463,15 +463,25 @@ const Index = () => {
                     </label>
                   </div>
 
-                  <div className="pt-4 border-t border-border flex justify-end">
+                  <div className="pt-4 border-t border-border flex flex-wrap gap-3 justify-end">
                     <Button 
-                      onClick={startCleaning}
+                      onClick={() => runCleaningPipeline('local')}
                       size="lg"
                       variant="outline"
                       className="gap-2"
+                      disabled={isApplyingFixes}
                     >
-                      {useAiCleaning ? <Brain className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
-                      Manual Pipeline
+                      <Sparkles className="w-4 h-4" />
+                      Local Clean Only
+                    </Button>
+                    <Button 
+                      onClick={() => runCleaningPipeline(useAiCleaning ? 'ai-deep' : 'ai-smart')}
+                      size="lg"
+                      className="gap-2"
+                      disabled={isApplyingFixes}
+                    >
+                      {isApplyingFixes ? <Loader2 className="w-4 h-4 animate-spin" /> : <Brain className="w-4 h-4" />}
+                      {useAiCleaning ? 'Deep AI Clean' : 'Smart Clean'}
                     </Button>
                   </div>
                 </div>
