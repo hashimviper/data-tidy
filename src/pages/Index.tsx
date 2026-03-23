@@ -127,7 +127,7 @@ const Index = () => {
     setSuggestedFixes(prev => prev.map(f => ({ ...f, enabled })));
   };
 
-  const runCleaningPipeline = async (mode: 'local' | 'ai-smart' | 'ai-deep') => {
+  const runCleaningPipeline = async (mode: 'local' | 'ai-augmented') => {
     if (!rawData) return;
 
     setIsApplyingFixes(true);
@@ -135,9 +135,9 @@ const Index = () => {
     setCurrentStep(3);
 
     try {
-      // Step 1: Apply AI-suggested fixes if in smart/deep mode
+      // Step 1: Apply AI-suggested fixes if in AI augmented mode
       let dataToProcess = rawData;
-      if (mode !== 'local' && suggestedFixes.length > 0) {
+      if (mode === 'ai-augmented' && suggestedFixes.length > 0) {
         dataToProcess = applySelectedFixes(rawData, suggestedFixes);
       }
 
@@ -147,11 +147,16 @@ const Index = () => {
       const llmProvider = groqKey ? 'groq' as const : 'google' as const;
       const llmApiKey = groqKey || googleKey;
 
-      const enableLLM = mode === 'ai-deep' && !!llmApiKey;
+      // AI augmented mode uses LLM for semantic cleaning when API key is available
+      const enableLLM = mode === 'ai-augmented' && !!llmApiKey;
+
+      // Dynamic chunk size based on dataset size for 1M+ support
+      const rowCount = dataToProcess.length;
+      const chunkSize = rowCount > 500000 ? 5000 : rowCount > 100000 ? 3000 : 1000;
 
       const processor = new DataProcessor({
         cleaningConfig: config,
-        chunkSize: 1000,
+        chunkSize,
         enableLLM,
         llmProvider,
         llmApiKey: llmApiKey || undefined,
