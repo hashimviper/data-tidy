@@ -197,8 +197,8 @@ const Index = () => {
       setCurrentStep(4);
 
       const ctx = processorResult.contextualReport;
-      const modeLabel = mode === 'local' ? 'Local' : mode === 'ai-smart' ? 'Smart AI' : 'Deep AI';
-      const fixCount = mode !== 'local' ? suggestedFixes.filter(f => f.enabled).length : 0;
+      const modeLabel = mode === 'local' ? 'Local' : 'AI Augmented';
+      const fixCount = mode === 'ai-augmented' ? suggestedFixes.filter(f => f.enabled).length : 0;
       const fixNote = fixCount > 0 ? ` Applied ${fixCount} AI fix(es).` : '';
       const rejectedNote = processorResult.rejectedRows.length > 0 ? ` ${processorResult.rejectedRows.length} rows rejected.` : '';
 
