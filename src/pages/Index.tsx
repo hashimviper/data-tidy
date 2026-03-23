@@ -53,7 +53,6 @@ const Index = () => {
   const [activeTab, setActiveTab] = useState('summary');
   const [schemaValidation, setSchemaValidation] = useState<SchemaValidationResult | null>(null);
   const [qualitySummary, setQualitySummary] = useState<DataQualitySummary | null>(null);
-  const [useAiCleaning, setUseAiCleaning] = useState(false);
   const [aiStatusMessage, setAiStatusMessage] = useState<string | undefined>(undefined);
   const [rejectedRows, setRejectedRows] = useState<RejectedRow[]>([]);
   const [processorLog, setProcessorLog] = useState<ReturnType<typeof Object> | null>(null);
@@ -127,7 +126,7 @@ const Index = () => {
     setSuggestedFixes(prev => prev.map(f => ({ ...f, enabled })));
   };
 
-  const runCleaningPipeline = async (mode: 'local' | 'ai-smart' | 'ai-deep') => {
+  const runCleaningPipeline = async (mode: 'local' | 'ai-augmented') => {
     if (!rawData) return;
 
     setIsApplyingFixes(true);
@@ -135,9 +134,9 @@ const Index = () => {
     setCurrentStep(3);
 
     try {
-      // Step 1: Apply AI-suggested fixes if in smart/deep mode
+      // Step 1: Apply AI-suggested fixes if in AI augmented mode
       let dataToProcess = rawData;
-      if (mode !== 'local' && suggestedFixes.length > 0) {
+      if (mode === 'ai-augmented' && suggestedFixes.length > 0) {
         dataToProcess = applySelectedFixes(rawData, suggestedFixes);
       }
 
@@ -147,11 +146,16 @@ const Index = () => {
       const llmProvider = groqKey ? 'groq' as const : 'google' as const;
       const llmApiKey = groqKey || googleKey;
 
-      const enableLLM = mode === 'ai-deep' && !!llmApiKey;
+      // AI augmented mode uses LLM for semantic cleaning when API key is available
+      const enableLLM = mode === 'ai-augmented' && !!llmApiKey;
+
+      // Dynamic chunk size based on dataset size for 1M+ support
+      const rowCount = dataToProcess.length;
+      const chunkSize = rowCount > 500000 ? 5000 : rowCount > 100000 ? 3000 : 1000;
 
       const processor = new DataProcessor({
         cleaningConfig: config,
-        chunkSize: 1000,
+        chunkSize,
         enableLLM,
         llmProvider,
         llmApiKey: llmApiKey || undefined,
@@ -192,8 +196,8 @@ const Index = () => {
       setCurrentStep(4);
 
       const ctx = processorResult.contextualReport;
-      const modeLabel = mode === 'local' ? 'Local' : mode === 'ai-smart' ? 'Smart AI' : 'Deep AI';
-      const fixCount = mode !== 'local' ? suggestedFixes.filter(f => f.enabled).length : 0;
+      const modeLabel = mode === 'local' ? 'Local' : 'AI Augmented';
+      const fixCount = mode === 'ai-augmented' ? suggestedFixes.filter(f => f.enabled).length : 0;
       const fixNote = fixCount > 0 ? ` Applied ${fixCount} AI fix(es).` : '';
       const rejectedNote = processorResult.rejectedRows.length > 0 ? ` ${processorResult.rejectedRows.length} rows rejected.` : '';
 
@@ -213,11 +217,11 @@ const Index = () => {
     setAiStatusMessage(undefined);
   };
 
-  const handleOneClickClean = () => runCleaningPipeline('ai-smart');
+  const handleOneClickClean = () => runCleaningPipeline('ai-augmented');
 
   const startCleaning = () => {
     if (rawData) {
-      runCleaningPipeline(useAiCleaning ? 'ai-deep' : 'local');
+      runCleaningPipeline('local');
     }
   };
 
@@ -318,7 +322,7 @@ const Index = () => {
     setActiveTab('summary');
     setSchemaValidation(null);
     setQualitySummary(null);
-    setUseAiCleaning(false);
+    setAiStatusMessage(undefined);
     setAiStatusMessage(undefined);
     setRejectedRows([]);
     setProcessorLog(null);
@@ -444,25 +448,6 @@ const Index = () => {
                     />
                   )}
 
-                   {/* AI Cleaning Toggle */}
-                  <div className="p-4 rounded-xl border border-border bg-muted/30">
-                    <label className="flex items-center gap-3 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={useAiCleaning}
-                        onChange={(e) => setUseAiCleaning(e.target.checked)}
-                        className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
-                      />
-                      <Brain className="w-5 h-5 text-primary" />
-                      <div>
-                        <span className="font-medium text-foreground text-sm">Enable Deep AI Cleaning</span>
-                        <p className="text-xs text-muted-foreground">
-                          Send messy rows to LLM for semantic normalization (slower, uses API credits)
-                        </p>
-                      </div>
-                    </label>
-                  </div>
-
                   <div className="pt-4 border-t border-border flex flex-wrap gap-3 justify-end">
                     <Button 
                       onClick={() => runCleaningPipeline('local')}
@@ -472,16 +457,16 @@ const Index = () => {
                       disabled={isApplyingFixes}
                     >
                       <Sparkles className="w-4 h-4" />
-                      Local Clean Only
+                      Local Clean
                     </Button>
                     <Button 
-                      onClick={() => runCleaningPipeline(useAiCleaning ? 'ai-deep' : 'ai-smart')}
+                      onClick={() => runCleaningPipeline('ai-augmented')}
                       size="lg"
                       className="gap-2"
                       disabled={isApplyingFixes}
                     >
                       {isApplyingFixes ? <Loader2 className="w-4 h-4 animate-spin" /> : <Brain className="w-4 h-4" />}
-                      {useAiCleaning ? 'Deep AI Clean' : 'Smart Clean'}
+                      AI Augmented Clean
                     </Button>
                   </div>
                 </div>

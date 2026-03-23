@@ -74,6 +74,8 @@ export class DataProcessor {
         mergedReport.booleansNormalized += report.booleansNormalized;
         mergedReport.genderNormalized += report.genderNormalized;
         mergedReport.ageImputedCount += report.ageImputedCount;
+        mergedReport.outliersCapped += report.outliersCapped;
+        mergedReport.numericIntegersEnforced += report.numericIntegersEnforced;
         if (report.ageGroupCreated) mergedReport.ageGroupCreated = true;
         if (report.calculatedAgeCreated) mergedReport.calculatedAgeCreated = true;
         report.piiColumnsMasked.forEach((col) => {
