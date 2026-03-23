@@ -199,7 +199,8 @@ export function applyContextualTransformations(data: DataRow[]): ContextualResul
         genderNormalized: 0,
         calculatedAgeCreated: false,
         ageImputedCount: 0,
-      },
+        outliersCapped: 0,
+        numericIntegersEnforced: 0,
     };
   }
 
