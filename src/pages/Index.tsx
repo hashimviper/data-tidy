@@ -221,7 +221,7 @@ const Index = () => {
 
   const startCleaning = () => {
     if (rawData) {
-      runCleaningPipeline(useAiCleaning ? 'ai-augmented' : 'local');
+      runCleaningPipeline('local');
     }
   };
 
