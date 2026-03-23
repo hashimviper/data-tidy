@@ -202,6 +202,7 @@ export function applyContextualTransformations(data: DataRow[]): ContextualResul
         outliersCapped: 0,
         numericIntegersEnforced: 0,
       },
+    };
   }
 
   const columns = Object.keys(data[0]);
