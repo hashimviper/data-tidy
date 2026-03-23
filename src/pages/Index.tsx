@@ -322,7 +322,7 @@ const Index = () => {
     setActiveTab('summary');
     setSchemaValidation(null);
     setQualitySummary(null);
-    setUseAiCleaning(false);
+    setAiStatusMessage(undefined);
     setAiStatusMessage(undefined);
     setRejectedRows([]);
     setProcessorLog(null);
