@@ -54,7 +54,6 @@ const Index = () => {
   const [schemaValidation, setSchemaValidation] = useState<SchemaValidationResult | null>(null);
   const [qualitySummary, setQualitySummary] = useState<DataQualitySummary | null>(null);
   const [aiStatusMessage, setAiStatusMessage] = useState<string | undefined>(undefined);
-  const [aiStatusMessage, setAiStatusMessage] = useState<string | undefined>(undefined);
   const [rejectedRows, setRejectedRows] = useState<RejectedRow[]>([]);
   const [processorLog, setProcessorLog] = useState<ReturnType<typeof Object> | null>(null);
 
