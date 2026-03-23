@@ -423,6 +423,71 @@ export function applyContextualTransformations(data: DataRow[]): ContextualResul
     }
   }
 
+  // ── Phase 3: IQR Outlier Capping + Integer Enforcement for numeric columns ──
+  let outliersCapped = 0;
+  let numericIntegersEnforced = 0;
+
+  // Identify all numeric/measure columns
+  const numericColumns = columns.filter(col => {
+    const role = roleMap.get(col) ?? 'unknown';
+    const inferred = typeMap.get(col) ?? 'text';
+    return inferred === 'measure' || role === 'revenue' || role === 'age';
+  });
+
+  for (const col of numericColumns) {
+    // Collect valid numeric values
+    const numVals: number[] = [];
+    for (const row of result) {
+      const val = row[col];
+      if (val !== null && val !== undefined && String(val).trim() !== '') {
+        const num = Number(String(val).replace(/,/g, ''));
+        if (!isNaN(num) && isFinite(num)) numVals.push(num);
+      }
+    }
+    if (numVals.length < 4) continue; // Need enough data for IQR
+
+    // Calculate IQR bounds
+    const sorted = [...numVals].sort((a, b) => a - b);
+    const q1Idx = Math.floor(sorted.length * 0.25);
+    const q3Idx = Math.floor(sorted.length * 0.75);
+    const q1 = sorted[q1Idx];
+    const q3 = sorted[q3Idx];
+    const iqr = q3 - q1;
+    const lowerBound = q1 - 1.5 * iqr;
+    const upperBound = q3 + 1.5 * iqr;
+
+    // Determine if this column should be integer (age, count-like, or all values are whole numbers)
+    const role = roleMap.get(col) ?? 'unknown';
+    const allInteger = numVals.every(v => Number.isInteger(v));
+    const isIntegerColumn = role === 'age' || allInteger;
+
+    // Cap outliers and enforce integer type
+    for (const row of result) {
+      const val = row[col];
+      if (val === null || val === undefined || String(val).trim() === '') continue;
+      let num = Number(String(val).replace(/,/g, ''));
+      if (isNaN(num) || !isFinite(num)) {
+        // Convert non-numeric strings to null for numeric columns
+        row[col] = null;
+        numericIntegersEnforced++;
+        continue;
+      }
+
+      // Cap outliers within IQR range
+      if (num < lowerBound) {
+        num = lowerBound;
+        outliersCapped++;
+      } else if (num > upperBound) {
+        num = upperBound;
+        outliersCapped++;
+      }
+
+      // Enforce integer for integer columns, otherwise round to 2 decimals
+      row[col] = isIntegerColumn ? Math.round(num) : Math.round(num * 100) / 100;
+      if (typeof val === 'string') numericIntegersEnforced++;
+    }
+  }
+
   // Count measures and dimensions
   const measuresDetected = headerClassifications.filter(h => h.role === 'revenue').length +
     columnInferences.filter(i => i.inferredType === 'measure' && !headerClassifications.find(h => h.column === i.column && h.role === 'revenue')).length;
@@ -442,6 +507,8 @@ export function applyContextualTransformations(data: DataRow[]): ContextualResul
       genderNormalized,
       calculatedAgeCreated,
       ageImputedCount,
+      outliersCapped,
+      numericIntegersEnforced,
     },
   };
 }
