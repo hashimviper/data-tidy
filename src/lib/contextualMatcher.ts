@@ -179,6 +179,8 @@ export interface ContextualReport {
   genderNormalized: number;
   calculatedAgeCreated: boolean;
   ageImputedCount: number;
+  outliersCapped: number;
+  numericIntegersEnforced: number;
 }
 
 export function applyContextualTransformations(data: DataRow[]): ContextualResult {
