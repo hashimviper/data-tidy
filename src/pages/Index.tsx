@@ -449,25 +449,6 @@ const Index = () => {
                     />
                   )}
 
-                   {/* AI Cleaning Toggle */}
-                  <div className="p-4 rounded-xl border border-border bg-muted/30">
-                    <label className="flex items-center gap-3 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={useAiCleaning}
-                        onChange={(e) => setUseAiCleaning(e.target.checked)}
-                        className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
-                      />
-                      <Brain className="w-5 h-5 text-primary" />
-                      <div>
-                        <span className="font-medium text-foreground text-sm">Enable Deep AI Cleaning</span>
-                        <p className="text-xs text-muted-foreground">
-                          Send messy rows to LLM for semantic normalization (slower, uses API credits)
-                        </p>
-                      </div>
-                    </label>
-                  </div>
-
                   <div className="pt-4 border-t border-border flex flex-wrap gap-3 justify-end">
                     <Button 
                       onClick={() => runCleaningPipeline('local')}
@@ -477,16 +458,16 @@ const Index = () => {
                       disabled={isApplyingFixes}
                     >
                       <Sparkles className="w-4 h-4" />
-                      Local Clean Only
+                      Local Clean
                     </Button>
                     <Button 
-                      onClick={() => runCleaningPipeline(useAiCleaning ? 'ai-deep' : 'ai-smart')}
+                      onClick={() => runCleaningPipeline('ai-augmented')}
                       size="lg"
                       className="gap-2"
                       disabled={isApplyingFixes}
                     >
                       {isApplyingFixes ? <Loader2 className="w-4 h-4 animate-spin" /> : <Brain className="w-4 h-4" />}
-                      {useAiCleaning ? 'Deep AI Clean' : 'Smart Clean'}
+                      AI Augmented Clean
                     </Button>
                   </div>
                 </div>
