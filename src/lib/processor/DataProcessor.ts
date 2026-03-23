@@ -150,7 +150,7 @@ export class DataProcessor {
     return {
       cleanedData: enhancedResult.data || dataToClean,
       enhancedResult,
-      rejectedRows,
+      rejectedRows: actualRejected,
       contextualReport,
       llmResult,
       log: this.logger.getSummary(),
