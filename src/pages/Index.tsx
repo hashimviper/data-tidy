@@ -218,11 +218,11 @@ const Index = () => {
     setAiStatusMessage(undefined);
   };
 
-  const handleOneClickClean = () => runCleaningPipeline('ai-smart');
+  const handleOneClickClean = () => runCleaningPipeline('ai-augmented');
 
   const startCleaning = () => {
     if (rawData) {
-      runCleaningPipeline(useAiCleaning ? 'ai-deep' : 'local');
+      runCleaningPipeline(useAiCleaning ? 'ai-augmented' : 'local');
     }
   };
 
