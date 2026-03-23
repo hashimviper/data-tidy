@@ -101,7 +101,13 @@ export class DataProcessor {
       this.logger.log('warn', 'validation', `${rejectedRows.length} rows failed schema validation`);
     }
 
-    let dataToClean = validRows;
+    // Fallback: if ALL rows were rejected, use the contextual data directly
+    // This ensures local cleaning always produces output
+    let dataToClean = validRows.length > 0 ? validRows : allContextData;
+    const actualRejected = validRows.length > 0 ? rejectedRows : [];
+    if (validRows.length === 0 && allContextData.length > 0) {
+      this.logger.log('warn', 'validation', 'All rows rejected by strict schema — falling back to contextual data');
+    }
 
     // ── Phase 3: Optional LLM cleaning (only for rows that need it) ──
     let llmResult: LLMCleaningResult | undefined;
@@ -144,7 +150,7 @@ export class DataProcessor {
     return {
       cleanedData: enhancedResult.data || dataToClean,
       enhancedResult,
-      rejectedRows,
+      rejectedRows: actualRejected,
       contextualReport,
       llmResult,
       log: this.logger.getSummary(),
