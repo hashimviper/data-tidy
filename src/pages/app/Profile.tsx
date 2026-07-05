@@ -14,7 +14,7 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import { useState } from 'react';
+import { Fragment as FragmentRow, useState } from 'react';
 
 const severityColor = {
   low: 'bg-blue-500/15 text-blue-500',
@@ -103,7 +103,7 @@ export default function Profile() {
               </TableHeader>
               <TableBody>
                 {ds.schema.map((c) => (
-                  <>
+                  <FragmentRow key={c.name}>
                     <TableRow key={c.name} className="cursor-pointer" onClick={() => setExpanded(expanded === c.name ? null : c.name)}>
                       <TableCell className="font-medium">{c.name}</TableCell>
                       <TableCell>
@@ -134,7 +134,7 @@ export default function Profile() {
                         </TableCell>
                       </TableRow>
                     )}
-                  </>
+                  </FragmentRow>
                 ))}
               </TableBody>
             </Table>
