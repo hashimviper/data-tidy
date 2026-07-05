@@ -425,54 +425,77 @@ export function applyContextualTransformations(data: DataRow[]): ContextualResul
     }
   }
 
-  // ── Phase 3: IQR Outlier Capping + Integer Enforcement for numeric columns ──
+  // ── Phase 3: IQR Outlier Capping + Median Imputation + Integer Enforcement ──
   let outliersCapped = 0;
   let numericIntegersEnforced = 0;
 
-  // Identify all numeric/measure columns
+  // Identify all numeric/measure columns (excluding age — handled separately above)
   const numericColumns = columns.filter(col => {
     const role = roleMap.get(col) ?? 'unknown';
     const inferred = typeMap.get(col) ?? 'text';
-    return inferred === 'measure' || role === 'revenue' || role === 'age';
+    return (inferred === 'measure' || role === 'revenue') && role !== 'age';
   });
 
   for (const col of numericColumns) {
-    // Collect valid numeric values
+    // Collect valid numeric values (ignore nulls, "Unknown", empty strings)
     const numVals: number[] = [];
     for (const row of result) {
       const val = row[col];
-      if (val !== null && val !== undefined && String(val).trim() !== '') {
-        const num = Number(String(val).replace(/,/g, ''));
-        if (!isNaN(num) && isFinite(num)) numVals.push(num);
-      }
+      if (val === null || val === undefined) continue;
+      const s = String(val).trim();
+      if (s === '' || s.toLowerCase() === 'unknown' || s.toLowerCase() === 'n/a') continue;
+      const num = Number(s.replace(/,/g, ''));
+      if (!isNaN(num) && isFinite(num)) numVals.push(num);
     }
-    if (numVals.length < 4) continue; // Need enough data for IQR
+    if (numVals.length === 0) continue;
 
-    // Calculate IQR bounds
-    const sorted = [...numVals].sort((a, b) => a - b);
-    const q1Idx = Math.floor(sorted.length * 0.25);
-    const q3Idx = Math.floor(sorted.length * 0.75);
-    const q1 = sorted[q1Idx];
-    const q3 = sorted[q3Idx];
-    const iqr = q3 - q1;
-    const lowerBound = q1 - 1.5 * iqr;
-    const upperBound = q3 + 1.5 * iqr;
+    // Calculate median for imputation
+    const sortedForMedian = [...numVals].sort((a, b) => a - b);
+    const midIdx = Math.floor(sortedForMedian.length / 2);
+    const median = sortedForMedian.length % 2
+      ? sortedForMedian[midIdx]
+      : (sortedForMedian[midIdx - 1] + sortedForMedian[midIdx]) / 2;
 
-    // Determine if this column should be integer (age, count-like, or all values are whole numbers)
-    const role = roleMap.get(col) ?? 'unknown';
+    // Calculate IQR bounds (only if enough data)
+    let lowerBound = -Infinity;
+    let upperBound = Infinity;
+    if (numVals.length >= 4) {
+      const q1 = sortedForMedian[Math.floor(sortedForMedian.length * 0.25)];
+      const q3 = sortedForMedian[Math.floor(sortedForMedian.length * 0.75)];
+      const iqr = q3 - q1;
+      lowerBound = q1 - 1.5 * iqr;
+      upperBound = q3 + 1.5 * iqr;
+    }
+
+    // Determine if this column should be integer
     const allInteger = numVals.every(v => Number.isInteger(v));
-    const isIntegerColumn = role === 'age' || allInteger;
+    const isIntegerColumn = allInteger;
 
-    // Cap outliers and enforce integer type
+    const imputeFlagCol = `is_${col.toLowerCase().replace(/[^a-z0-9]/g, '_')}_imputed`;
+
+    // Impute, cap outliers, and enforce integer type
     for (const row of result) {
       const val = row[col];
-      if (val === null || val === undefined || String(val).trim() === '') continue;
-      let num = Number(String(val).replace(/,/g, ''));
-      if (isNaN(num) || !isFinite(num)) {
-        // Convert non-numeric strings to null for numeric columns
-        row[col] = null;
-        numericIntegersEnforced++;
-        continue;
+      const s = val === null || val === undefined ? '' : String(val).trim();
+      const isMissing = s === '' || s.toLowerCase() === 'unknown' || s.toLowerCase() === 'n/a';
+
+      let num: number;
+      if (isMissing) {
+        // IMPUTE with median (never leave numeric columns blank)
+        num = median;
+        row[imputeFlagCol] = true;
+        missingValuesNormalized++;
+      } else {
+        const parsed = Number(s.replace(/,/g, ''));
+        if (isNaN(parsed) || !isFinite(parsed)) {
+          // Non-numeric junk → impute with median
+          num = median;
+          row[imputeFlagCol] = true;
+          numericIntegersEnforced++;
+        } else {
+          num = parsed;
+          row[imputeFlagCol] = false;
+        }
       }
 
       // Cap outliers within IQR range
@@ -484,11 +507,12 @@ export function applyContextualTransformations(data: DataRow[]): ContextualResul
         outliersCapped++;
       }
 
-      // Enforce integer for integer columns, otherwise round to 2 decimals
+      // Enforce integer or round to 2 decimals
       row[col] = isIntegerColumn ? Math.round(num) : Math.round(num * 100) / 100;
       if (typeof val === 'string') numericIntegersEnforced++;
     }
   }
+
 
   // Count measures and dimensions
   const measuresDetected = headerClassifications.filter(h => h.role === 'revenue').length +
