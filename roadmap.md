@@ -1,0 +1,3 @@
+- [ ] Harden file ingestion and cleaning transformations with auditable conditional fixes.
+- [ ] Add profile-specific export validation and focused regression tests.
+- [ ] Verify a real cleaning flow, review diagnostics, and commit the changes.
