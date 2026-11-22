@@ -167,6 +167,10 @@ export interface ContextualResult {
   report: ContextualReport;
 }
 
+export interface ContextualOptions {
+  deferNumericProcessing?: boolean;
+}
+
 export interface ContextualReport {
   headerClassifications: HeaderClassification[];
   columnInferences: ColumnInference[];
@@ -183,7 +187,7 @@ export interface ContextualReport {
   numericIntegersEnforced: number;
 }
 
-export function applyContextualTransformations(data: DataRow[]): ContextualResult {
+export function applyContextualTransformations(data: DataRow[], options: ContextualOptions = {}): ContextualResult {
   if (data.length === 0) {
     return {
       data: [],
@@ -279,7 +283,7 @@ export function applyContextualTransformations(data: DataRow[]): ContextualResul
 
   // ── Phase 1: Ensure age column is integer, collect values for median ──
   const ageValues: number[] = [];
-  if (ageColumn) {
+  if (ageColumn && !options.deferNumericProcessing) {
     for (const row of result) {
       const val = row[ageColumn];
       if (val !== null && val !== undefined && String(val).trim() !== '') {
@@ -311,6 +315,7 @@ export function applyContextualTransformations(data: DataRow[]): ContextualResul
 
       // ── Age column: flag-and-impute strategy ──
       if (role === 'age') {
+        if (options.deferNumericProcessing) continue;
         if (valIsEmpty || isNaN(Number(val))) {
           if (medianAge !== null) {
             row[col] = medianAge;
@@ -433,10 +438,10 @@ export function applyContextualTransformations(data: DataRow[]): ContextualResul
   const numericColumns = columns.filter(col => {
     const role = roleMap.get(col) ?? 'unknown';
     const inferred = typeMap.get(col) ?? 'text';
-    return (inferred === 'measure' || role === 'revenue') && role !== 'age';
+    return (inferred === 'measure' || role === 'revenue') && role !== 'age' && role !== 'identity';
   });
 
-  for (const col of numericColumns) {
+  for (const col of options.deferNumericProcessing ? [] : numericColumns) {
     // Collect valid numeric values (ignore nulls, "Unknown", empty strings)
     const numVals: number[] = [];
     for (const row of result) {

@@ -9,6 +9,7 @@ import { inferColumnDefs, buildRowSchema, validateRows, type RejectedRow, type C
 import { applyContextualTransformations, type ContextualReport } from '../contextualMatcher';
 import { cleanWithLLM, identifyRowsNeedingLLM, type LLMCleaningResult, type LLMProgressCallback } from './llmInterface';
 import { cleanDataAdvanced } from '../dataCleaner';
+import { prepareInputRows, type IngestionReport } from '../dataPreparation';
 import { type CleaningConfig, type EnhancedCleaningResult } from '../dataTypes';
 
 type DataRow = Record<string, unknown>;
@@ -32,6 +33,7 @@ export interface ProcessorResult {
   llmResult?: LLMCleaningResult;
   log: ReturnType<ProcessingLogger['getSummary']>;
   columnDefs: ColumnDef[];
+  ingestionReport: IngestionReport;
 }
 
 export class DataProcessor {
@@ -43,8 +45,11 @@ export class DataProcessor {
     this.logger = new ProcessingLogger();
   }
 
-  async process(data: DataRow[]): Promise<ProcessorResult> {
+  async process(inputData: DataRow[]): Promise<ProcessorResult> {
     this.logger.start();
+
+    const preparedInput = prepareInputRows(inputData);
+    const data = preparedInput.data;
 
     if (data.length === 0) {
       this.logger.log('warn', 'processor', 'Empty dataset received');
@@ -55,7 +60,7 @@ export class DataProcessor {
     this.logger.log('info', 'processor', `Starting pipeline for ${data.length} rows`);
 
     // ── Phase 1: Chunked contextual transformation ──
-    const chunkSize = this.config.chunkSize ?? DEFAULT_CHUNK_SIZE;
+    const chunkSize = Math.max(1, this.config.chunkSize ?? DEFAULT_CHUNK_SIZE);
     const contextChunks = this.chunkArray(data, chunkSize);
     let allContextData: DataRow[] = [];
     let mergedReport: ContextualReport | null = null;
@@ -63,7 +68,7 @@ export class DataProcessor {
     this.logger.log('info', 'contextual', `Processing ${contextChunks.length} chunk(s) of ${chunkSize}`);
 
     for (let i = 0; i < contextChunks.length; i++) {
-      const { data: chunkData, report } = applyContextualTransformations(contextChunks[i]);
+      const { data: chunkData, report } = applyContextualTransformations(contextChunks[i], { deferNumericProcessing: true });
       allContextData.push(...chunkData);
       this.logger.trackRows(chunkData.length);
 
@@ -155,6 +160,7 @@ export class DataProcessor {
       llmResult,
       log: this.logger.getSummary(),
       columnDefs,
+      ingestionReport: preparedInput.report,
     };
   }
 

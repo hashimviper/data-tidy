@@ -22,6 +22,7 @@ import {
   isNonInferableColumn,
   isIdentifierColumn
 } from './dataAnalyzer';
+import { parseDirtyNumber } from './dataPreparation';
 
 type DataRow = Record<string, unknown>;
 
@@ -115,20 +116,21 @@ function interpolateNumeric(values: (number | null)[]): number[] {
 }
 
 // Forward fill for dates
-function forwardFillDates(dates: (Date | null)[], medianDate: Date | null): Date[] {
-  const result: Date[] = [];
+function forwardFillDates(dates: (Date | null)[], medianDate: Date | null): (Date | null)[] {
+  const result: (Date | null)[] = [];
   let lastValid: Date | null = null;
   
   for (let i = 0; i < dates.length; i++) {
     if (dates[i] !== null) {
-      lastValid = dates[i];
-      result.push(dates[i]!);
+      const date = dates[i];
+      if (date) lastValid = date;
+      result.push(date);
     } else if (lastValid !== null) {
       result.push(lastValid);
     } else if (medianDate !== null) {
       result.push(medianDate);
     } else {
-      result.push(new Date());
+      result.push(null);
     }
   }
   
@@ -136,20 +138,21 @@ function forwardFillDates(dates: (Date | null)[], medianDate: Date | null): Date
 }
 
 // Backward fill for dates
-function backwardFillDates(dates: (Date | null)[], medianDate: Date | null): Date[] {
-  const result: Date[] = new Array(dates.length);
+function backwardFillDates(dates: (Date | null)[], medianDate: Date | null): (Date | null)[] {
+  const result: (Date | null)[] = new Array(dates.length);
   let nextValid: Date | null = null;
   
   for (let i = dates.length - 1; i >= 0; i--) {
     if (dates[i] !== null) {
-      nextValid = dates[i];
-      result[i] = dates[i]!;
+      const date = dates[i];
+      if (date) nextValid = date;
+      result[i] = date;
     } else if (nextValid !== null) {
       result[i] = nextValid;
     } else if (medianDate !== null) {
       result[i] = medianDate;
     } else {
-      result[i] = new Date();
+      result[i] = null;
     }
   }
   
@@ -348,14 +351,14 @@ export function cleanDataAdvanced(
       const medianDate = profile.dateInfo?.medianDate || null;
       
       // Apply date imputation based on config
-      let filledDates: Date[];
+      let filledDates: (Date | null)[];
       if (fullConfig.dateImputation === 'forward_fill') {
         filledDates = forwardFillDates(parsedDates, medianDate);
       } else if (fullConfig.dateImputation === 'backward_fill') {
         filledDates = backwardFillDates(parsedDates, medianDate);
       } else {
         // median imputation
-        filledDates = parsedDates.map(d => d || medianDate || new Date());
+        filledDates = parsedDates.map(d => d || medianDate);
       }
       
       // Apply fixed dates and track which rows had imputed dates
@@ -364,13 +367,14 @@ export function cleanDataAdvanced(
         const newDate = filledDates[idx];
         
         if (isEmpty(originalVal) || parsedDates[idx] === null) {
-          row[profile.name] = newDate.toISOString().split('T')[0];
+          row[profile.name] = newDate ? newDate.toISOString().split('T')[0] : 'Unknown';
           fixedCount++;
           datesFixed++;
-          imputedDates.add(idx); // Track this row as having an imputed date
+          if (newDate) imputedDates.add(idx);
           columnImputationCounts[profile.name] = (columnImputationCounts[profile.name] || 0) + 1;
         } else if (parsedDates[idx]) {
-          row[profile.name] = parsedDates[idx]!.toISOString().split('T')[0];
+          const parsedDate = parsedDates[idx];
+          if (parsedDate) row[profile.name] = parsedDate.toISOString().split('T')[0];
         }
       });
       
@@ -396,16 +400,20 @@ export function cleanDataAdvanced(
     const conversionDetails: string[] = [];
     
     columnProfiles.forEach(profile => {
-      if (profile.dataType === 'numeric') {
+      if (profile.dataType === 'numeric' && !isIdentifierColumn(profile.name, integrityPolicy)) {
         let converted = 0;
+        const observedNumbers = cleanedData
+          .map((row) => parseDirtyNumber(row[profile.name]))
+          .filter((value): value is number => value !== null);
+        const lowerName = profile.name.toLowerCase();
+        const integerColumn = lowerName.includes('age') || lowerName.includes('salary') || observedNumbers.every(Number.isInteger);
         cleanedData.forEach(row => {
           const val = row[profile.name];
           if (val !== null && val !== undefined && val !== '') {
-            const strVal = String(val).replace(/,/g, '');
-            const num = Number(strVal);
-            if (!isNaN(num)) {
-              row[profile.name] = num;
-              if (typeof val === 'string') converted++;
+            const num = parseDirtyNumber(val);
+            if (num !== null) {
+              row[profile.name] = integerColumn ? Math.round(num) : num;
+              if (typeof val === 'string' || row[profile.name] !== num) converted++;
             }
           }
         });
@@ -447,7 +455,7 @@ export function cleanDataAdvanced(
   if (fullConfig.normalizeCategorical) {
     const normalizations: string[] = [];
     
-    columnProfiles.forEach(profile => {
+    columnProfiles.filter((profile) => !isIdentifierColumn(profile.name, integrityPolicy)).forEach(profile => {
       if ((profile.dataType === 'categorical' || profile.dataType === 'text' || profile.dataType === 'boolean') && 
           profile.categoricalInfo) {
         
@@ -575,8 +583,13 @@ export function cleanDataAdvanced(
     const outlierActions: string[] = [];
     
     columnProfiles.forEach(profile => {
-      if (profile.dataType === 'numeric' && profile.stats && profile.stats.outlierCount > 0) {
+      if (profile.dataType === 'numeric' && !isIdentifierColumn(profile.name, integrityPolicy) && profile.stats && profile.stats.outlierCount > 0) {
         const { q1, q3, iqr, mean, stdDev } = profile.stats;
+        const observedNumbers = cleanedData
+          .map((row) => parseDirtyNumber(row[profile.name]))
+          .filter((value): value is number => value !== null);
+        const lowerName = profile.name.toLowerCase();
+        const integerColumn = lowerName.includes('age') || lowerName.includes('salary') || observedNumbers.every(Number.isInteger);
         
         let lowerBound: number, upperBound: number;
         
@@ -595,10 +608,10 @@ export function cleanDataAdvanced(
             const val = Number(row[profile.name]);
             if (!isNaN(val)) {
               if (val < lowerBound) {
-                row[profile.name] = Math.round(lowerBound * 100) / 100;
+                row[profile.name] = integerColumn ? Math.round(lowerBound) : Math.round(lowerBound * 100) / 100;
                 handled++;
               } else if (val > upperBound) {
-                row[profile.name] = Math.round(upperBound * 100) / 100;
+                row[profile.name] = integerColumn ? Math.round(upperBound) : Math.round(upperBound * 100) / 100;
                 handled++;
               }
             }
@@ -641,6 +654,7 @@ export function cleanDataAdvanced(
   
   columnProfiles.forEach(profile => {
     if (profile.nullCount === 0) return;
+    if (isIdentifierColumn(profile.name, integrityPolicy)) return;
     
     const values = cleanedData.map(row => row[profile.name]);
     const nonNullValues = values.filter(v => !isEmpty(v));
@@ -648,15 +662,19 @@ export function cleanDataAdvanced(
     let fillValue: unknown;
     
     if (profile.dataType === 'numeric') {
-      const numericValues = nonNullValues.map(v => Number(v)).filter(v => !isNaN(v));
+      const numericValues = nonNullValues
+        .map((value) => parseDirtyNumber(value))
+        .filter((value): value is number => value !== null);
+      const lowerName = profile.name.toLowerCase();
+      const integerColumn = lowerName.includes('age') || lowerName.includes('salary') || numericValues.every(Number.isInteger);
+      const imputeFlagCol = `is_${profile.name.replace(/[^a-z0-9_]/gi, '_')}_imputed`;
       
       // Choose imputation method based on data characteristics
-      if (profile.isTimeSeries && fullConfig.enableTimeSeriesInterpolation) {
+      if (profile.isTimeSeries && fullConfig.enableTimeSeriesInterpolation && numericValues.length > 0) {
         // Time-series interpolation
         const numericWithNulls = values.map(v => {
           if (isEmpty(v)) return null;
-          const num = Number(v);
-          return isNaN(num) ? null : num;
+          return parseDirtyNumber(v);
         });
         
         const interpolated = interpolateNumeric(numericWithNulls);
@@ -664,7 +682,8 @@ export function cleanDataAdvanced(
         
         cleanedData.forEach((row, idx) => {
           if (isEmpty(row[profile.name])) {
-            row[profile.name] = Math.round(interpolated[idx] * 100) / 100;
+            row[profile.name] = integerColumn ? Math.round(interpolated[idx]) : Math.round(interpolated[idx] * 100) / 100;
+            row[imputeFlagCol] = true;
             interpCount++;
             interpolatedValues++;
           }
@@ -683,20 +702,20 @@ export function cleanDataAdvanced(
         case 'mean':
           fillValue = numericValues.length > 0 
             ? Math.round((numericValues.reduce((a, b) => a + b, 0) / numericValues.length) * 100) / 100
-            : 0;
+            : undefined;
           break;
         case 'median':
-          fillValue = median(numericValues);
+          fillValue = numericValues.length > 0 ? median(numericValues) : undefined;
           break;
         case 'mode':
-          fillValue = mode(numericValues) ?? 0;
+          fillValue = mode(numericValues);
           break;
         case 'zero':
           fillValue = 0;
           break;
         case 'interpolate':
           // Fall back to median for non-time-series
-          fillValue = median(numericValues);
+          fillValue = numericValues.length > 0 ? median(numericValues) : undefined;
           break;
         case 'remove':
           break;
@@ -704,7 +723,7 @@ export function cleanDataAdvanced(
       
       // Smart fallback: if skewed, prefer median even if mean was selected
       if (isSkewed && fullConfig.numericImputation === 'mean') {
-        fillValue = median(numericValues);
+        fillValue = numericValues.length > 0 ? median(numericValues) : undefined;
       }
     } else if (profile.dataType === 'categorical' || profile.dataType === 'text') {
       const missingPct = profile.categoricalInfo?.missingPercentage || 0;
@@ -724,15 +743,30 @@ export function cleanDataAdvanced(
     if (fillValue !== undefined && fullConfig.enforceZeroBlank) {
       let filled = 0;
       cleanedData.forEach(row => {
-        if (isEmpty(row[profile.name])) {
-          row[profile.name] = fillValue;
+        const parsed = profile.dataType === 'numeric' ? parseDirtyNumber(row[profile.name]) : null;
+        const isMissingValue = isEmpty(row[profile.name]) || (profile.dataType === 'numeric' && parsed === null);
+        if (isMissingValue) {
+          row[profile.name] = profile.dataType === 'numeric' && typeof fillValue === 'number' && integerColumn
+            ? Math.round(fillValue)
+            : fillValue;
+          if (profile.dataType === 'numeric') row[imputeFlagCol] = true;
           filled++;
+        } else if (profile.dataType === 'numeric') {
+          row[imputeFlagCol] = false;
         }
       });
       
       if (filled > 0) {
         missingActions.push(`${profile.name}: ${filled} → ${String(fillValue).substring(0, 20)}`);
       }
+    } else if (profile.dataType === 'numeric') {
+      cleanedData.forEach((row) => {
+        const parsed = parseDirtyNumber(row[profile.name]);
+        const missing = parsed === null;
+        if (missing) row[profile.name] = null;
+        row[imputeFlagCol] = missing;
+      });
+      if (numericValues.length === 0) missingActions.push(`${profile.name}: missing values preserved as null; no valid reference values`);
     }
   });
   
@@ -776,12 +810,12 @@ export function cleanDataAdvanced(
       const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
       
       // Get fallback values from median date
-      const medianDate = profile.dateInfo?.medianDate || new Date();
-      const fallbackYear = medianDate.getFullYear();
-      const fallbackQuarter = `Q${Math.floor(medianDate.getMonth() / 3) + 1}`;
-      const fallbackMonth = medianDate.getMonth() + 1;
-      const fallbackMonthName = monthNames[medianDate.getMonth()];
-      const fallbackDayOfWeek = dayNames[medianDate.getDay()];
+      const medianDate = profile.dateInfo?.medianDate ?? null;
+      const fallbackYear = medianDate ? medianDate.getFullYear() : 'Unknown';
+      const fallbackQuarter = medianDate ? `Q${Math.floor(medianDate.getMonth() / 3) + 1}` : 'Unknown';
+      const fallbackMonth = medianDate ? medianDate.getMonth() + 1 : 'Unknown';
+      const fallbackMonthName = medianDate ? monthNames[medianDate.getMonth()] : 'Unknown';
+      const fallbackDayOfWeek = medianDate ? dayNames[medianDate.getDay()] : 'Unknown';
       
       let derivedFromImputedCount = 0;
       
@@ -842,60 +876,46 @@ export function cleanDataAdvanced(
       if (profile.dataType === 'numeric') {
         const name = profile.name.toLowerCase();
         
-        // Check for negative values where not expected
+        // Flag unexpected values instead of silently changing business data.
         const shouldBePositive = ['price', 'cost', 'amount', 'quantity', 'qty', 'count', 
           'age', 'revenue', 'sales', 'units', 'weight', 'height', 'width', 'length', 'salary']
           .some(p => name.includes(p));
         
         if (shouldBePositive) {
-          let corrected = 0;
+          let flagged = 0;
           cleanedData.forEach(row => {
             const val = Number(row[profile.name]);
-            if (!isNaN(val) && val < 0) {
-              row[profile.name] = Math.abs(val);
-              corrected++;
-            }
+            if (!isNaN(val) && val < 0) flagged++;
           });
           
-          if (corrected > 0) {
-            rangeIssues.push(`${profile.name}: ${corrected} negative → positive`);
+          if (flagged > 0) {
+            rangeIssues.push(`${profile.name}: ${flagged} negative values flagged for review (not altered)`);
           }
         }
         
         // Check for percentages > 100
         if (name.includes('percent') || name.includes('pct') || name.includes('rate')) {
-          let corrected = 0;
+          let flagged = 0;
           cleanedData.forEach(row => {
             const val = Number(row[profile.name]);
-            if (!isNaN(val) && val > 100) {
-              row[profile.name] = 100;
-              corrected++;
-            }
+            if (!isNaN(val) && val > 100) flagged++;
           });
           
-          if (corrected > 0) {
-            rangeIssues.push(`${profile.name}: ${corrected} values capped at 100%`);
+          if (flagged > 0) {
+            rangeIssues.push(`${profile.name}: ${flagged} values above 100 flagged for review (not altered)`);
           }
         }
         
         // Check for age constraints
         if (name.includes('age')) {
-          let corrected = 0;
+          let flagged = 0;
           cleanedData.forEach(row => {
             const val = Number(row[profile.name]);
-            if (!isNaN(val)) {
-              if (val > 120) {
-                row[profile.name] = 120;
-                corrected++;
-              } else if (val < 0) {
-                row[profile.name] = 0;
-                corrected++;
-              }
-            }
+            if (!isNaN(val) && (val > 120 || val < 0)) flagged++;
           });
           
-          if (corrected > 0) {
-            rangeIssues.push(`${profile.name}: ${corrected} ages constrained to 0-120`);
+          if (flagged > 0) {
+            rangeIssues.push(`${profile.name}: ${flagged} ages outside 0-120 flagged for review (not altered)`);
           }
         }
       }
@@ -904,11 +924,11 @@ export function cleanDataAdvanced(
     if (rangeIssues.length > 0) {
       actions.push({
         type: 'validate_ranges',
-        description: 'Validated and corrected value ranges',
+        description: 'Checked value ranges; suspicious values were flagged without alteration',
         count: rangeIssues.length,
         details: rangeIssues
       });
-      cleaningHighlights.push(`Fixed range issues in ${rangeIssues.length} columns`);
+      cleaningHighlights.push(`Flagged possible range issues in ${rangeIssues.length} columns for review`);
     }
   }
   
@@ -921,18 +941,19 @@ export function cleanDataAdvanced(
         if (isEmpty(row[key])) {
           // Determine appropriate default based on existing values
           const existingProfile = columnProfiles.find(p => p.name === key);
-          if (existingProfile) {
-            if (existingProfile.dataType === 'numeric') {
-              row[key] = 0;
-            } else if (existingProfile.dataType === 'date') {
-              row[key] = new Date().toISOString().split('T')[0];
-            } else {
-              row[key] = 'Unknown';
-            }
+          if (isIdentifierColumn(key, integrityPolicy)) {
+            row[key] = null;
+            blanksFixed++;
+          } else if (existingProfile?.dataType === 'numeric') {
+            row[key] = null;
+            blanksFixed++;
+          } else if (existingProfile?.dataType === 'date') {
+            row[key] = 'Unknown';
+            blanksFixed++;
           } else {
             row[key] = 'Unknown';
+            blanksFixed++;
           }
-          blanksFixed++;
         }
       });
     });
