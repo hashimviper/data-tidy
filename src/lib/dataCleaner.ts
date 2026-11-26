@@ -450,6 +450,25 @@ export function cleanDataAdvanced(
     }
   }
   
+  // Identifiers are never imputed, regardless of the inferred data type.
+  columnProfiles.filter((profile) => isIdentifierColumn(profile.name, integrityPolicy)).forEach((profile) => {
+    if (!protectedFields.includes(profile.name)) protectedFields.push(profile.name);
+    const missingCount = cleanedData.filter((row) => {
+      const value = row[profile.name];
+      return isEmpty(value) || (typeof value === 'string' && value.trim().toLowerCase() === 'unknown');
+    }).length;
+    if (missingCount > 0) {
+      flaggedIds.push({ column: profile.name, count: missingCount });
+      actions.push({
+        type: 'flag_missing_ids',
+        column: profile.name,
+        description: `Flagged ${missingCount} missing identifiers (not imputed per policy)`,
+        count: missingCount,
+        policyApplied: 'Identifier values are never inferred or imputed',
+      });
+    }
+  });
+
   // Step 7: Normalize categorical values with DATA INTEGRITY POLICY
   // Sensitive fields (gender, ethnicity, etc.) are protected from inference
   if (fullConfig.normalizeCategorical) {
@@ -605,8 +624,8 @@ export function cleanDataAdvanced(
         
         if (fullConfig.outlierHandling === 'cap') {
           cleanedData.forEach(row => {
-            const val = Number(row[profile.name]);
-            if (!isNaN(val)) {
+            const val = parseDirtyNumber(row[profile.name]);
+            if (val !== null) {
               if (val < lowerBound) {
                 row[profile.name] = integerColumn ? Math.round(lowerBound) : Math.round(lowerBound * 100) / 100;
                 handled++;
@@ -619,15 +638,15 @@ export function cleanDataAdvanced(
         } else if (fullConfig.outlierHandling === 'remove') {
           const beforeCount = cleanedData.length;
           cleanedData = cleanedData.filter(row => {
-            const val = Number(row[profile.name]);
-            return isNaN(val) || (val >= lowerBound && val <= upperBound);
+            const val = parseDirtyNumber(row[profile.name]);
+            return val === null || (val >= lowerBound && val <= upperBound);
           });
           handled = beforeCount - cleanedData.length;
         } else if (fullConfig.outlierHandling === 'flag') {
           const flagCol = `${profile.name}_outlier`;
           cleanedData.forEach(row => {
-            const val = Number(row[profile.name]);
-            row[flagCol] = !isNaN(val) && (val < lowerBound || val > upperBound);
+            const val = parseDirtyNumber(row[profile.name]);
+            row[flagCol] = val !== null && (val < lowerBound || val > upperBound);
             if (row[flagCol]) handled++;
           });
         }
@@ -653,21 +672,30 @@ export function cleanDataAdvanced(
   const missingActions: string[] = [];
   
   columnProfiles.forEach(profile => {
-    if (profile.nullCount === 0) return;
+    if (profile.nullCount === 0) {
+      if (profile.dataType === 'numeric' && !isIdentifierColumn(profile.name, integrityPolicy)) {
+        const flagColumn = `is_${profile.name.replace(/[^a-z0-9_]/gi, '_')}_imputed`;
+        cleanedData.forEach((row) => { row[flagColumn] = false; });
+      }
+      return;
+    }
     if (isIdentifierColumn(profile.name, integrityPolicy)) return;
     
     const values = cleanedData.map(row => row[profile.name]);
     const nonNullValues = values.filter(v => !isEmpty(v));
     
     let fillValue: unknown;
+    let integerColumn = false;
+    let imputeFlagCol = '';
+    let numericValues: number[] = [];
     
     if (profile.dataType === 'numeric') {
-      const numericValues = nonNullValues
+      numericValues = nonNullValues
         .map((value) => parseDirtyNumber(value))
         .filter((value): value is number => value !== null);
       const lowerName = profile.name.toLowerCase();
-      const integerColumn = lowerName.includes('age') || lowerName.includes('salary') || numericValues.every(Number.isInteger);
-      const imputeFlagCol = `is_${profile.name.replace(/[^a-z0-9_]/gi, '_')}_imputed`;
+      integerColumn = lowerName.includes('age') || lowerName.includes('salary') || numericValues.every(Number.isInteger);
+      imputeFlagCol = `is_${profile.name.replace(/[^a-z0-9_]/gi, '_')}_imputed`;
       
       // Choose imputation method based on data characteristics
       if (profile.isTimeSeries && fullConfig.enableTimeSeriesInterpolation && numericValues.length > 0) {
@@ -884,8 +912,8 @@ export function cleanDataAdvanced(
         if (shouldBePositive) {
           let flagged = 0;
           cleanedData.forEach(row => {
-            const val = Number(row[profile.name]);
-            if (!isNaN(val) && val < 0) flagged++;
+            const val = parseDirtyNumber(row[profile.name]);
+            if (val !== null && val < 0) flagged++;
           });
           
           if (flagged > 0) {
@@ -897,8 +925,8 @@ export function cleanDataAdvanced(
         if (name.includes('percent') || name.includes('pct') || name.includes('rate')) {
           let flagged = 0;
           cleanedData.forEach(row => {
-            const val = Number(row[profile.name]);
-            if (!isNaN(val) && val > 100) flagged++;
+            const val = parseDirtyNumber(row[profile.name]);
+            if (val !== null && val > 100) flagged++;
           });
           
           if (flagged > 0) {
@@ -910,8 +938,8 @@ export function cleanDataAdvanced(
         if (name.includes('age')) {
           let flagged = 0;
           cleanedData.forEach(row => {
-            const val = Number(row[profile.name]);
-            if (!isNaN(val) && (val > 120 || val < 0)) flagged++;
+            const val = parseDirtyNumber(row[profile.name]);
+            if (val !== null && (val > 120 || val < 0)) flagged++;
           });
           
           if (flagged > 0) {
@@ -939,6 +967,7 @@ export function cleanDataAdvanced(
     cleanedData.forEach(row => {
       Object.keys(row).forEach(key => {
         if (isEmpty(row[key])) {
+          if (row[key] === null || row[key] === undefined) return;
           // Determine appropriate default based on existing values
           const existingProfile = columnProfiles.find(p => p.name === key);
           if (isIdentifierColumn(key, integrityPolicy)) {

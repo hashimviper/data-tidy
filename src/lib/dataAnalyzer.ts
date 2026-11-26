@@ -36,68 +36,58 @@ const BOOLEAN_VALUES = {
 export function parseMultiFormatDate(value: unknown): { date: Date | null; format: string } {
   if (!value) return { date: null, format: 'unknown' };
   if (value instanceof Date) return { date: value, format: 'Date' };
-  
+
   const str = String(value).trim();
   if (!str) return { date: null, format: 'unknown' };
-  
-  // Try YYYYMMDD format
+
+  const calendarDate = (year: number, month: number, day: number): Date | null => {
+    if (year < 1900 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+    const date = new Date(year, month - 1, day, 12);
+    return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day ? date : null;
+  };
+
   if (/^\d{8}$/.test(str)) {
-    const y = parseInt(str.substring(0, 4));
-    const m = parseInt(str.substring(4, 6)) - 1;
-    const d = parseInt(str.substring(6, 8));
-    const date = new Date(y, m, d);
-    if (!isNaN(date.getTime()) && date.getFullYear() > 1900 && date.getFullYear() < 2100) {
+    const date = calendarDate(Number(str.substring(0, 4)), Number(str.substring(4, 6)), Number(str.substring(6, 8)));
+    if (date) {
       return { date, format: 'YYYYMMDD' };
     }
   }
-  
-  // Try ISO format first
-  if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
-    const parsed = new Date(str);
-    if (!isNaN(parsed.getTime()) && parsed.getFullYear() > 1900 && parsed.getFullYear() < 2100) {
-      return { date: parsed, format: 'YYYY-MM-DD' };
+
+  const iso = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/i);
+  if (iso) {
+    const date = calendarDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+    const hours = iso[4] === undefined ? 0 : Number(iso[4]);
+    const minutes = iso[5] === undefined ? 0 : Number(iso[5]);
+    const seconds = iso[6] === undefined ? 0 : Number(iso[6]);
+    if (date && hours < 24 && minutes < 60 && seconds < 60) {
+      return { date, format: iso[4] === undefined ? 'YYYY-MM-DD' : 'ISO' };
     }
   }
-  
-  // Try YYYY/MM/DD
+
   const ymdSlash = str.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
   if (ymdSlash) {
-    const parsed = new Date(parseInt(ymdSlash[1]), parseInt(ymdSlash[2]) - 1, parseInt(ymdSlash[3]));
-    if (!isNaN(parsed.getTime())) return { date: parsed, format: 'YYYY/MM/DD' };
+    const date = calendarDate(Number(ymdSlash[1]), Number(ymdSlash[2]), Number(ymdSlash[3]));
+    if (date) return { date, format: 'YYYY/MM/DD' };
   }
-  
-  // Try MM/DD/YYYY
-  const mdyMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (mdyMatch) {
-    const parsed = new Date(parseInt(mdyMatch[3]), parseInt(mdyMatch[1]) - 1, parseInt(mdyMatch[2]));
-    if (!isNaN(parsed.getTime())) return { date: parsed, format: 'MM/DD/YYYY' };
+
+  const delimited = str.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (delimited) {
+    const first = Number(delimited[1]);
+    const second = Number(delimited[2]);
+    const year = Number(delimited[3]);
+    const slashFormat = str.includes('/');
+    const dayFirst = first > 12 || (second <= 12 && !slashFormat);
+    const month = dayFirst ? second : first;
+    const day = dayFirst ? first : second;
+    const date = calendarDate(year, month, day);
+    if (date) return { date, format: dayFirst ? (slashFormat ? 'DD/MM/YYYY' : 'DD-MM-YYYY') : 'MM/DD/YYYY' };
   }
-  
-  // Try DD-MM-YYYY
-  const dmyMatch = str.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
-  if (dmyMatch) {
-    const parsed = new Date(parseInt(dmyMatch[3]), parseInt(dmyMatch[2]) - 1, parseInt(dmyMatch[1]));
-    if (!isNaN(parsed.getTime())) return { date: parsed, format: 'DD-MM-YYYY' };
-  }
-  
-  // Try DD/MM/YYYY
-  const dmySlash = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (dmySlash) {
-    // Ambiguous - try DD/MM/YYYY if day > 12
-    const first = parseInt(dmySlash[1]);
-    const second = parseInt(dmySlash[2]);
-    if (first > 12 && second <= 12) {
-      const parsed = new Date(parseInt(dmySlash[3]), second - 1, first);
-      if (!isNaN(parsed.getTime())) return { date: parsed, format: 'DD/MM/YYYY' };
-    }
-  }
-  
-  // Try natural language formats
+
   const parsed = new Date(str);
-  if (!isNaN(parsed.getTime()) && parsed.getFullYear() > 1900 && parsed.getFullYear() < 2100) {
+  if (!isNaN(parsed.getTime()) && parsed.getFullYear() >= 1900 && parsed.getFullYear() <= 2100) {
     return { date: parsed, format: 'natural' };
   }
-  
+
   return { date: null, format: 'unknown' };
 }
 

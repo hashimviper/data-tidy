@@ -174,7 +174,7 @@ export function prepareInputRows(input: DataRow[]): PreparedRows {
           normalized[outputHeader] = cleaned;
         }
       } else {
-        normalized[outputHeader] = value;
+        normalized[outputHeader] = value === undefined ? null : value;
       }
     }
     return normalized;
@@ -246,7 +246,7 @@ export async function parseDelimitedFile(file: File): Promise<PreparedRows> {
   const headerInfo = uniqueHeaders(rawHeaders);
   let raggedRows = 0;
   let extraCells = 0;
-  const largestRow = Math.max(rawHeaders.length, ...rows.slice(1).map((row) => row.length));
+  const largestRow = rows.slice(1).reduce((largest, row) => Math.max(largest, row.length), rawHeaders.length);
   const headers = [...headerInfo.headers];
   for (let index = headers.length; index < largestRow; index++) headers.push(`extra_column_${index - rawHeaders.length + 1}`);
 
@@ -261,11 +261,13 @@ export async function parseDelimitedFile(file: File): Promise<PreparedRows> {
   });
   const prepared = prepareInputRows(records);
   prepared.report.encoding = encoding;
-  prepared.report.headersRenamed = Math.max(prepared.report.headersRenamed, headerInfo.renamed);
+  prepared.report.headersRenamed += headerInfo.renamed;
   prepared.report.duplicateHeaders += headerInfo.duplicates;
   prepared.report.raggedRows = raggedRows;
   prepared.report.extraCells = extraCells;
   if (encoding !== 'UTF-8') prepared.report.details.push(`Decoded file using ${encoding}`);
+  if (headerInfo.renamed > 0) prepared.report.details.push(`Standardized ${headerInfo.renamed} column headers`);
+  if (headerInfo.duplicates > 0) prepared.report.details.push(`Disambiguated ${headerInfo.duplicates} duplicate column headers`);
   if (raggedRows > 0) prepared.report.details.push(`Repaired ${raggedRows} rows with uneven column counts`);
   if (extraCells > 0) prepared.report.details.push(`Preserved ${extraCells} extra cell values in added columns`);
   return prepared;

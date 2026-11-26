@@ -9,7 +9,7 @@ import { inferColumnDefs, buildRowSchema, validateRows, type RejectedRow, type C
 import { applyContextualTransformations, type ContextualReport } from '../contextualMatcher';
 import { cleanWithLLM, identifyRowsNeedingLLM, type LLMCleaningResult, type LLMProgressCallback } from './llmInterface';
 import { cleanDataAdvanced } from '../dataCleaner';
-import { prepareInputRows, type IngestionReport } from '../dataPreparation';
+import { mergeIngestionReports, prepareInputRows, type IngestionReport } from '../dataPreparation';
 import { type CleaningConfig, type EnhancedCleaningResult } from '../dataTypes';
 
 type DataRow = Record<string, unknown>;
@@ -23,6 +23,7 @@ export interface ProcessorConfig {
   llmProvider?: 'groq' | 'google';
   llmApiKey?: string;
   onLLMProgress?: LLMProgressCallback;
+  ingestionReport?: IngestionReport;
 }
 
 export interface ProcessorResult {
@@ -83,9 +84,10 @@ export class DataProcessor {
         mergedReport.numericIntegersEnforced += report.numericIntegersEnforced;
         if (report.ageGroupCreated) mergedReport.ageGroupCreated = true;
         if (report.calculatedAgeCreated) mergedReport.calculatedAgeCreated = true;
+        const targetReport = mergedReport;
         report.piiColumnsMasked.forEach((col) => {
-          if (!mergedReport!.piiColumnsMasked.includes(col)) {
-            mergedReport!.piiColumnsMasked.push(col);
+          if (!targetReport.piiColumnsMasked.includes(col)) {
+            targetReport.piiColumnsMasked.push(col);
           }
         });
       }
@@ -93,7 +95,8 @@ export class DataProcessor {
       this.logger.log('info', 'contextual', `Chunk ${i + 1}/${contextChunks.length} done`);
     }
 
-    const contextualReport = mergedReport!;
+    if (!mergedReport) throw new Error('The contextual cleaning phase produced no report.');
+    const contextualReport = mergedReport;
     this.logger.log('info', 'contextual', `Contextual transforms complete. Measures: ${contextualReport.measuresDetected}, Dimensions: ${contextualReport.dimensionsDetected}`);
 
     // ── Phase 2: Schema validation (Zod) ──
@@ -160,7 +163,10 @@ export class DataProcessor {
       llmResult,
       log: this.logger.getSummary(),
       columnDefs,
-      ingestionReport: preparedInput.report,
+      ingestionReport: mergeIngestionReports(
+        preparedInput.report,
+        ...(this.config.ingestionReport ? [this.config.ingestionReport] : []),
+      ),
     };
   }
 

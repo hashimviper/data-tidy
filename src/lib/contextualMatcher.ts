@@ -335,7 +335,7 @@ export function applyContextualTransformations(data: DataRow[], options: Context
 
       // ── Missing value normalization (non-age) ──
       if (valIsEmpty) {
-        if (inferred === 'measure' || role === 'revenue') {
+        if (role === 'identity' || inferred === 'measure' || role === 'revenue') {
           row[col] = null;
         } else {
           row[col] = 'Unknown';

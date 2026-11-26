@@ -1,6 +1,11 @@
+import { useMemo, useState } from 'react';
 import { EnhancedCleaningResult } from '@/lib/dataTypes';
 import { dataToCSV, dataToExcel, dataToJSON, generateCleaningReport, downloadFile } from '@/lib/dataExporter';
+import { getIdentifierColumns, validateExportProfile, type ExportProfile } from '@/lib/exportProfiles';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { 
   DropdownMenu, 
   DropdownMenuContent, 
@@ -18,25 +23,45 @@ interface ExportPanelProps {
 
 export function ExportPanel({ result, originalFileName, originalFormat }: ExportPanelProps) {
   const baseName = originalFileName.replace(/\.(csv|xlsx|xls)$/i, '');
-  const hasChanges = result.summary.totalChanges > 0;
+  const [profile, setProfile] = useState<ExportProfile>('bi_ready');
+  const [primaryKey, setPrimaryKey] = useState('');
+  const keyCandidates = getIdentifierColumns(result.data);
+  const columns = Object.keys(result.data[0] ?? {});
+  const selectedKey = primaryKey || keyCandidates[0] || '';
+  const validation = useMemo(
+    () => validateExportProfile(result.data, profile, selectedKey || undefined),
+    [result.data, profile, selectedKey],
+  );
+  const profileSuffix = profile;
 
   const handleDownloadCSV = () => {
-    const csv = dataToCSV(result.data);
-    downloadFile(csv, `${baseName}_cleaned.csv`, 'text/csv;charset=utf-8');
+    const csv = dataToCSV(validation.data);
+    downloadFile(csv, `${baseName}_${profileSuffix}.csv`, 'text/csv;charset=utf-8');
   };
 
   const handleDownloadExcel = () => {
-    const blob = dataToExcel(result.data, 'Cleaned Data');
-    downloadFile(blob, `${baseName}_cleaned.xlsx`);
+    const blob = dataToExcel(validation.data, 'Cleaned Data');
+    downloadFile(blob, `${baseName}_${profileSuffix}.xlsx`);
   };
 
   const handleDownloadJSON = () => {
-    const json = dataToJSON(result.data);
-    downloadFile(json, `${baseName}_cleaned.json`, 'application/json');
+    const json = dataToJSON(validation.data);
+    downloadFile(json, `${baseName}_${profileSuffix}.json`, 'application/json');
   };
 
   const handleDownloadReport = () => {
-    const report = generateCleaningReport(result, originalFileName);
+    const status = validation.ready ? 'READY' : 'NOT READY';
+    const report = [
+      generateCleaningReport(result, originalFileName),
+      '',
+      'EXPORT PROFILE CHECK',
+      `Target: ${profile.replaceAll('_', ' ')}`,
+      `Status: ${status}`,
+      `Primary key: ${selectedKey || 'not selected'}`,
+      `Categorical columns encoded: ${validation.encodedColumns}`,
+      ...validation.errors.map((error) => `ERROR: ${error}`),
+      ...validation.warnings.map((warning) => `WARNING: ${warning}`),
+    ].join('\n');
     downloadFile(report, `${baseName}_cleaning_report.txt`, 'text/plain;charset=utf-8');
   };
 
@@ -48,21 +73,68 @@ export function ExportPanel({ result, originalFileName, originalFormat }: Export
     }
   };
 
-  if (!hasChanges) {
-    return (
-      <div className="text-center text-sm text-muted-foreground">
-        No changes applied. Download the original file if needed.
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+    <div className="space-y-5">
+      <div className="grid gap-4 text-left sm:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="export-profile">Export target</Label>
+          <Select value={profile} onValueChange={(value) => setProfile(value as ExportProfile)}>
+            <SelectTrigger id="export-profile">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="bi_ready">BI Ready</SelectItem>
+              <SelectItem value="ml_training_ready">ML Training Ready</SelectItem>
+              <SelectItem value="data_engineering_ready">Data Engineering Ready</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {(profile === 'bi_ready' || profile === 'data_engineering_ready') && (
+          <div className="space-y-2">
+            <Label htmlFor="export-primary-key">Key column</Label>
+            <Select value={selectedKey} onValueChange={setPrimaryKey}>
+              <SelectTrigger id="export-primary-key">
+                <SelectValue placeholder="Choose a key column" />
+              </SelectTrigger>
+              <SelectContent>
+                {columns.map((column) => <SelectItem key={column} value={column}>{column}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+      </div>
+
+      <div role="status" className="space-y-2 rounded-md border p-4 text-left">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={validation.ready ? 'default' : 'destructive'}>
+            {validation.ready ? 'Checks passed' : 'Review required'}
+          </Badge>
+          <span className="text-sm text-muted-foreground">
+            {profile === 'ml_training_ready'
+              ? `${validation.encodedColumns} categorical columns encoded; ${validation.excludedIdentifiers.length} identifiers excluded.`
+              : profile === 'data_engineering_ready'
+                ? `Uniqueness checked for ${selectedKey || 'no selected key'}.`
+                : `Key completeness checked for ${selectedKey || 'no selected key'}.`}
+          </span>
+        </div>
+        {validation.errors.slice(0, 4).map((error) => (
+          <p key={error} className="text-sm text-destructive">{error}</p>
+        ))}
+        {validation.errors.length > 4 && (
+          <p className="text-xs text-muted-foreground">And {validation.errors.length - 4} more checks; the report includes the first 100.</p>
+        )}
+        {validation.warnings.map((warning) => (
+          <p key={warning} className="text-sm text-muted-foreground">{warning}</p>
+        ))}
+      </div>
+
+      <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
       {/* Primary Download Button */}
       <Button 
         onClick={handleDownloadPrimary} 
         size="lg" 
         className="gap-2 min-w-[200px] hover:scale-105 transition-transform"
+        disabled={!validation.ready}
       >
         {originalFormat === 'excel' ? <FileSpreadsheet className="w-5 h-5" /> : <FileText className="w-5 h-5" />}
         Download {originalFormat === 'excel' ? 'Excel' : 'CSV'}
@@ -71,7 +143,7 @@ export function ExportPanel({ result, originalFileName, originalFormat }: Export
       {/* More Formats Dropdown */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="lg" className="gap-2 hover:scale-105 transition-transform">
+          <Button variant="outline" size="lg" className="gap-2 hover:scale-105 transition-transform" disabled={!validation.ready}>
             <Download className="w-4 h-4" />
             More Formats
             <ChevronDown className="w-4 h-4" />
@@ -109,6 +181,7 @@ export function ExportPanel({ result, originalFileName, originalFormat }: Export
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      </div>
     </div>
   );
 }
