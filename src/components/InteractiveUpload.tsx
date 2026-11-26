@@ -74,7 +74,7 @@ export function InteractiveUpload({ onFileSelect, isLoading }: InteractiveUpload
       >
         <input
           type="file"
-          accept=".csv,.xlsx,.xls"
+          accept=".csv,.tsv,.json,.xlsx,.xls"
           onChange={handleFileChange}
           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
           disabled={isLoading}
@@ -112,7 +112,7 @@ export function InteractiveUpload({ onFileSelect, isLoading }: InteractiveUpload
           <p className="text-muted-foreground mb-4">or click to browse</p>
           
           <div className="flex items-center gap-2">
-            {['.csv', '.xlsx', '.xls'].map((format) => (
+            {['.csv', '.tsv', '.json', '.xlsx', '.xls'].map((format) => (
               <span 
                 key={format}
                 className="px-3 py-1.5 rounded-full bg-muted text-muted-foreground text-xs font-medium hover:bg-primary/10 hover:text-primary transition-colors"

@@ -16,7 +16,7 @@ export function dataToCSV(data: DataRow[]): string {
     columns
       .map((col) => {
         const value = row[col];
-        if (value === null || value === undefined) return '';
+        if (value === null || value === undefined) return '"null"';
         const stringValue = String(value);
         return `"${stringValue.replace(/"/g, '""')}"`;
       })
